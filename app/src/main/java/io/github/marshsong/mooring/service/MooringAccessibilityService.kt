@@ -71,6 +71,7 @@ class MooringAccessibilityService : AccessibilityService() {
     private var currentForegroundTargetId: String? = null
     private var currentPackage: String? = null
     private var lastWindowClassName: String? = null
+    private var lastPositiveSignalAt: Long = 0L
     private var tracker: UsageTracker? = null
     private var today: String = LocalDate.now().format(ISO_DATE)
 
@@ -87,7 +88,10 @@ class MooringAccessibilityService : AccessibilityService() {
         blockManager = BlockManager(
             startRein = { target, reason -> startRein(target, reason) },
             performBack = { performGlobalAction(GLOBAL_ACTION_BACK) },
-            isForegroundBlocked = { targetId -> targetId == currentForegroundTargetId },
+            isForegroundBlocked = { targetId ->
+                targetId == currentForegroundTargetId &&
+                    System.currentTimeMillis() - lastPositiveSignalAt < ACTIVE_WINDOW_MS
+            },
         )
         tracker = UsageTracker(
             clock = { System.currentTimeMillis() },
@@ -135,6 +139,7 @@ class MooringAccessibilityService : AccessibilityService() {
         // 一级：窗口类名匹配 T2 功能（最高优先级）
         val t2Id = resolveT2TargetId(pkg, className)
         if (t2Id != null) {
+            lastPositiveSignalAt = System.currentTimeMillis()
             setCurrentTarget(t2Id)
         } else if (leftApp || !detector.hasActiveFeatures(pkg)) {
             // 换了应用，或无订阅：直接解析 T1（或清空）
@@ -189,20 +194,20 @@ class MooringAccessibilityService : AccessibilityService() {
         val texts = T2ContentScanner(root).collectTexts()
         val feature = detector.matchByContent(pkg, texts)
         if (feature != null) {
+            lastPositiveSignalAt = System.currentTimeMillis()
             val targetId = detector.targetIdOf(pkg, feature)
             val target = snapTargets.firstOrNull { it.targetId == targetId && it.enabled } ?: return
             setCurrentTarget(targetId)
             Log.i(TAG, "T2_DETECTED target=$targetId level=CONTENT")
             evaluateBlock(target)
         } else {
-            // 内容未命中：仅当当前窗口类名也不是该包的任何功能（如已切到聊天）时才清除。
-            // 在功能页内滚动时类名仍命中 finder，即使内容抓不全也不丢计时。
+            // 内容未命中：粘性锁，仅当长时间无正向信号（如已切到聊天）才清除。
+            // 在功能页内滚动时信号断续不丢计时。
             val cur = currentForegroundTargetId
-            if (cur != null && cur.startsWith("FUNC:") && TargetId.parsePackage(cur) == pkg) {
-                val stillOnFeature = resolveT2TargetId(pkg, lastWindowClassName) != null
-                if (!stillOnFeature) {
-                    setCurrentTarget(null)
-                }
+            if (cur != null && cur.startsWith("FUNC:") && TargetId.parsePackage(cur) == pkg &&
+                System.currentTimeMillis() - lastPositiveSignalAt > STICKY_GRACE_MS
+            ) {
+                setCurrentTarget(null)
             }
         }
     }
@@ -232,6 +237,12 @@ class MooringAccessibilityService : AccessibilityService() {
 
     /** 对目标做拦截评估；命中则触发勒马页并记录事件。 */
     private fun evaluateBlock(target: Target): Boolean {
+        // 活跃门控：FUNC 目标只有在最近确实被检测到（避免粘性锁在聊天中误拦）
+        if (target.kind == TargetKind.FUNC &&
+            System.currentTimeMillis() - lastPositiveSignalAt > ACTIVE_WINDOW_MS
+        ) {
+            return false
+        }
         val now = LocalDateTime.now()
         val result = engine.evaluate(
             RuleEngine.Input(
@@ -536,6 +547,8 @@ class MooringAccessibilityService : AccessibilityService() {
         private const val MOCK_SUB_ASSET = "mock_subscription.json"
         private const val TICK_INTERVAL_MS = 10_000L
         private const val RETENTION_MS = 90L * 24 * 60 * 60 * 1000
+        private const val STICKY_GRACE_MS = 45_000L
+        private const val ACTIVE_WINDOW_MS = 30_000L
         private val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
         /** 无障碍服务是否已开启。 */

@@ -101,7 +101,7 @@ T1 服务所有人，T2 专攻最难啃的场景。哪怕微信某次大改版�
 从 [Releases](../../releases) 下载 APK，或从源码构建：
 
 ```bash
-git clone https://github.com/<your-name>/mooring.git
+git clone https://github.com/marshsong/mooring.git
 # 用 Android Studio 打开 → 运行到手机
 ```
 

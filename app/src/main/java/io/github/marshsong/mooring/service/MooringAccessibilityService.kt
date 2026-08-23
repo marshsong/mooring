@@ -27,6 +27,7 @@ import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
 import io.github.marshsong.mooring.engine.model.TargetKind
 import io.github.marshsong.mooring.engine.model.TargetSource
+import io.github.marshsong.mooring.engine.subscription.ParsedSubscription
 import io.github.marshsong.mooring.engine.t2.T2Detector
 import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.ui.ReinActivity
@@ -54,6 +55,7 @@ class MooringAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val contentHandler = Handler(Looper.getMainLooper())
+    private val contentScanExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val tickRunnable: Runnable = Runnable { tick() }
     private val engine = RuleEngine()
@@ -179,20 +181,25 @@ class MooringAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** 二级内容扫描（按检测配置去抖，每包同时仅一个挂起任务）。 */
+    /** 二级内容扫描（按检测配置去抖，每包同时仅一个挂起任务）。扫描在后台线程，结果回主线程应用。 */
     private fun scheduleContentScan(pkg: String) {
         if (!pendingContentScans.add(pkg)) return
         val debounce = config?.detectionDebounceMs ?: 300L
         contentHandler.postDelayed({
             pendingContentScans.remove(pkg)
-            runContentScan(pkg)
+            contentScanExecutor.execute {
+                runCatching {
+                    val root = rootInActiveWindow ?: return@runCatching
+                    val texts = T2ContentScanner(root).collectTexts()
+                    val feature = detector.matchByContent(pkg, texts)
+                    contentHandler.post { applyContentScanResult(pkg, feature) }
+                }
+            }
         }, debounce)
     }
 
-    private fun runContentScan(pkg: String) {
-        val root = rootInActiveWindow ?: return
-        val texts = T2ContentScanner(root).collectTexts()
-        val feature = detector.matchByContent(pkg, texts)
+    /** 在主线程应用内容扫描结果（更新目标、评估拦截）。 */
+    private fun applyContentScanResult(pkg: String, feature: ParsedSubscription.ParsedFeature?) {
         if (feature != null) {
             lastPositiveSignalAt = System.currentTimeMillis()
             val targetId = detector.targetIdOf(pkg, feature)
@@ -220,6 +227,7 @@ class MooringAccessibilityService : AccessibilityService() {
         tracker?.flush()
         handler.removeCallbacksAndMessages(null)
         contentHandler.removeCallbacksAndMessages(null)
+        contentScanExecutor.shutdownNow()
         // server owned by AppRuntime, kept alive by foreground service
         RuntimeStatus.moored = false
         scope.cancel()

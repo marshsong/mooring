@@ -101,7 +101,7 @@ Any other app: toggle "Add app" in the console and enter its package name.
 Grab the APK from [Releases](../../releases), or build from source:
 
 ```bash
-git clone https://github.com/<your-name>/mooring.git
+git clone https://github.com/marshsong/mooring.git
 # Open in Android Studio → Run on device
 ```
 

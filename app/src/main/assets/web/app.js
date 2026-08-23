@@ -82,7 +82,13 @@ function showMain() {
   el("pairView").classList.add("hidden");
   el("mainView").classList.remove("hidden");
   bindTabs();
+  el("btnFocus").addEventListener("click", async () => {
+    if (!ensureWrite()) return;
+    try { await api("POST", "/api/focus", { minutes: 45 }); await loadStatus(); }
+    catch (e) { alert(e.msg || "专注模式启动失败"); }
+  });
   loadStatus();
+  setInterval(() => { loadStatus(true); }, 5000);
 }
 
 function bindTabs() {
@@ -96,7 +102,7 @@ function bindTabs() {
   });
 }
 
-async function loadStatus() {
+async function loadStatus(light) {
   try {
     status = await api("GET", "/api/status");
   } catch (e) { el("statusBadge").textContent = "不可达"; return; }
@@ -105,11 +111,130 @@ async function loadStatus() {
   badge.textContent = status.moored ? "已拴牢" : "脱缰";
   badge.classList.toggle("moored", !!status.moored);
   el("readonlyBadge").classList.toggle("hidden", paired);
+  el("btnFocus").classList.toggle("hidden", !paired);
+  renderCooldown();
+  renderFocus();
+  if (light) return;
   renderStatus();
   renderApps();
   renderGroups();
   renderRules();
   renderSubs();
+  renderDashboard();
+}
+
+function renderFocus() {
+  el("focusBadge").classList.toggle("hidden", !status.focusActive);
+  if (status.focusActive) {
+    const m = Math.ceil(status.focusRemainingSeconds / 60);
+    el("focusBadge").textContent = "专注中 " + m + " 分";
+  }
+}
+
+function renderCooldown() {
+  const bar = el("cooldownBar");
+  const cd = status.activeCooldown;
+  if (!cd) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  const now = Date.now();
+  const expiresAt = cd.expiresAt;
+  const windowStart = expiresAt;
+  const windowEnd = expiresAt + 120000;
+  let html;
+  if (now < windowStart) {
+    const remainMin = Math.max(1, Math.ceil((windowStart - now) / 60000));
+    html = `<span>冷静期进行中，约 ${remainMin} 分钟后进入确认窗口（可修改时限为 5-30 分钟）。</span>
+      <button id="btnCdCancel">取消</button>`;
+  } else if (now <= windowEnd) {
+    const remainSec = Math.max(0, Math.ceil((windowEnd - now) / 1000));
+    html = `<span>冷静期已到期，${remainSec} 秒内点击"确认生效"应用修改，超时作废。</span>
+      <button id="btnCdConfirm">确认生效</button>
+      <button id="btnCdCancel">取消</button>`;
+  } else {
+    html = `<span>冷静期已超时作废。</span>`;
+  }
+  bar.innerHTML = html;
+  bar.classList.remove("hidden");
+  const confirmBtn = el("btnCdConfirm");
+  if (confirmBtn) confirmBtn.addEventListener("click", async () => {
+    if (!ensureWrite()) return;
+    try { await api("POST", "/api/cooldown/" + encodeURIComponent(cd.id) + "/confirm"); await loadStatus(); }
+    catch (e) { alert(e.msg || "确认失败"); await loadStatus(); }
+  });
+  const cancelBtn = el("btnCdCancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", async () => {
+    if (!ensureWrite()) return;
+    try { await api("POST", "/api/cooldown/" + encodeURIComponent(cd.id) + "/cancel"); await loadStatus(); }
+    catch (e) { alert(e.msg || "取消失败"); }
+  });
+}
+
+/* ---------------- 看板 ---------------- */
+
+let dashboardCharts = {};
+
+function renderDashboard() {
+  const t = el("tab-dashboard");
+  const targets = status.targets || [];
+  const enabled = targets.filter(x => x.enabled);
+  const today = status.today || {};
+  const bonuses = status.todayBonuses || {};
+
+  let html = `<div class="section-title">今日用量</div>
+    <canvas id="chartToday" height="120"></canvas>`;
+  html += `<div class="section-title">近 7 天总用量（分钟）</div>
+    <canvas id="chart7d" height="120"></canvas>`;
+  html += `<div class="section-title">事件流水（最近 50 条）</div>
+    <div id="eventStream" class="muted"></div>`;
+  html += `<div class="section-title">导出</div>
+    <button id="btnCsv" class="secondary">导出今日用量 CSV</button>`;
+  t.innerHTML = html;
+
+  // 今日柱状图
+  const todayLabels = enabled.map(x => x.label);
+  const todayVals = enabled.map(x => Math.round((today[x.targetId] || 0) / 60));
+  if (window.Chart) {
+    if (dashboardCharts.today) dashboardCharts.today.destroy();
+    dashboardCharts.today = new Chart(el("chartToday"), {
+      type: "bar",
+      data: { labels: todayLabels, datasets: [{ label: "分钟", data: todayVals, backgroundColor: "#3B5BDB" }] },
+      options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+
+  // 7 天序列
+  api("GET", "/api/usage?days=7").then(series => {
+    const days = (series.days || []).map(d => d.date);
+    const totals = (series.days || []).map(d => Math.round(Object.values(d.targets || {}).reduce((a, b) => a + b, 0) / 60));
+    if (window.Chart && el("chart7d")) {
+      if (dashboardCharts.seven) dashboardCharts.seven.destroy();
+      dashboardCharts.seven = new Chart(el("chart7d"), {
+        type: "line",
+        data: { labels: days, datasets: [{ label: "分钟", data: totals, borderColor: "#30A46C", tension: .3 }] },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+      });
+    }
+  });
+
+  // 事件流
+  api("GET", "/api/events?limit=50").then(events => {
+    const stream = el("eventStream");
+    if (!stream) return;
+    stream.innerHTML = (events || []).map(e =>
+      `<div class="row"><span class="label">${new Date(e.ts).toLocaleTimeString()} ${esc(e.type)} ${esc(e.targetId || "")} ${esc(e.detailJson || "")}</span></div>`
+    ).join("") || "暂无事件";
+  });
+
+  // CSV
+  el("btnCsv").addEventListener("click", () => {
+    const rows = [["target", "label", "used_minutes", "bonus_minutes"]];
+    enabled.forEach(x => rows.push([x.targetId, x.label, Math.round((today[x.targetId] || 0) / 60), Math.round((bonuses[x.targetId] || 0) / 60)]));
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "mooring_usage_today.csv";
+    a.click();
+  });
 }
 
 function ensureWrite() {
@@ -169,6 +294,7 @@ async function renderApps() {
     const on = !!(tgt && tgt.enabled);
     html += `<div class="row">
       <span class="label">${esc(c.label)} <span class="sub">${esc(c.packageName)}</span></span>
+      ${on ? `<button class="secondary" data-act="unlock" data-tid="${esc(tgt.targetId)}">+15 解锁</button>` : ""}
       <button class="${on ? "danger" : ""}" data-act="toggle-cat" data-pkg="${esc(c.packageName)}" data-label="${esc(c.label)}">${on ? "停用" : "启用"}</button>
     </div>`;
   });
@@ -204,6 +330,16 @@ async function renderApps() {
         }
         await loadStatus();
       } catch (e) { alert(e.msg || "操作失败"); }
+    });
+  });
+  document.querySelectorAll("#tab-apps [data-act=unlock]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!ensureWrite()) return;
+      try {
+        await api("POST", "/api/unlock", { targetId: btn.dataset.tid, minutes: 15 });
+        await loadStatus();
+        alert("已发起临时解锁申请，请等待冷静期到期后确认。");
+      } catch (e) { alert(e.msg || "解锁申请失败"); }
     });
   });
   el("btnManualAdd").addEventListener("click", async () => {

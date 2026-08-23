@@ -60,3 +60,10 @@ textarea { width: 100%; min-height: 120px; padding: 10px; border: 1px solid #d4d
 .stat { background: #fff; border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(16,26,58,.06); }
 .stat .num { font-size: 22px; font-weight: 700; }
 .stat .cap { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.cooldown-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+  background: #fff7ed; color: #9a3412; font-size: 14px;
+  border-bottom: 1px solid #fed7aa;
+}
+.cooldown-bar button { padding: 6px 12px; font-size: 13px; }
+#btnCdConfirm { background: #30a46c; }

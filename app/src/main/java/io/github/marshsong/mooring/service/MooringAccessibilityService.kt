@@ -29,6 +29,7 @@ import io.github.marshsong.mooring.engine.model.TargetGroup
 import io.github.marshsong.mooring.engine.model.TargetKind
 import io.github.marshsong.mooring.engine.model.TargetSource
 import io.github.marshsong.mooring.engine.t2.T2Detector
+import io.github.marshsong.mooring.settings.SettingsStore
 import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.ui.ReinActivity
 import io.github.marshsong.mooring.web.RuntimeStatus
@@ -66,10 +67,12 @@ class MooringAccessibilityService : AccessibilityService() {
     private lateinit var blockManager: BlockManager
     private var webServer: WebServer? = null
 
+    private lateinit var settings: SettingsStore
     private var config: DetectorConfig? = null
     private var snapTargets: List<Target> = emptyList()
     private var snapRules: List<Rule> = emptyList()
     private var usageCache: MutableMap<String, Long> = mutableMapOf()
+    private var bonusCache: MutableMap<String, Long> = mutableMapOf()
     private var currentForegroundTargetId: String? = null
     private var tracker: UsageTracker? = null
     private var today: String = LocalDate.now().format(ISO_DATE)
@@ -77,6 +80,7 @@ class MooringAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         repository = RoomMooringRepository(MooringDatabase.get(this))
+        settings = SettingsStore(this)
         config = loadConfig()
         blockManager = BlockManager(
             startRein = { target, reason -> startRein(target, reason) },
@@ -93,6 +97,7 @@ class MooringAccessibilityService : AccessibilityService() {
             context = this,
             repository = repository,
             configProvider = { config ?: DetectorConfig() },
+            settings = settings,
             onConfigChanged = { refreshRuntimeConfig() },
         )
         webServer?.start()
@@ -101,10 +106,12 @@ class MooringAccessibilityService : AccessibilityService() {
 
         scope.launch {
             bootstrapDevIfFirstRun()
+            ensureDefaultRules()
             snapTargets = repository.allTargets()
             snapRules = repository.allRules()
             reloadT2()
             usageCache = repository.usageMap(today).toMutableMap()
+            bonusCache = repository.todayBonuses(today).toMutableMap()
             repository.cleanupOldEvents(System.currentTimeMillis() - RETENTION_MS)
             logEvent(EventType.SERVICE_STATUS, null, null, "Moored")
             Log.i(
@@ -223,6 +230,7 @@ class MooringAccessibilityService : AccessibilityService() {
                 rules = snapRules,
                 now = now,
                 usageOfToday = { id -> usageCache[id] ?: 0L },
+                bonusSecondsOfToday = { id -> bonusCache[id] ?: 0L },
             )
         )
         if (result.blocked) {
@@ -405,12 +413,54 @@ class MooringAccessibilityService : AccessibilityService() {
         Log.i(TAG, "T2_LOAD features=${detector.featureCount} packages=${detector.packages().size}")
     }
 
+    /** 默认规则 v2（F9）：无任何组时自动建"视频组"，纳入已启用视频类目标与 FUNC 目标。 */
+    private suspend fun ensureDefaultRules() {
+        if (repository.allGroups().isNotEmpty()) return
+        val targets = repository.allTargets().filter { it.enabled }
+        val catalog = config?.appCatalog ?: return
+        val videoTargets = targets.filter { t ->
+            t.kind == TargetKind.APP && catalog.any { it.packageName == t.packageName && it.category == "video" }
+        }
+        val funcTargets = targets.filter { it.kind == TargetKind.FUNC }
+        val members = (videoTargets + funcTargets).distinctBy { it.targetId }
+        if (members.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val groupId = "g-default-video"
+        repository.upsertGroups(listOf(TargetGroup(id = groupId, name = "视频组", createdAt = now)))
+        members.forEach { t -> repository.upsertTargets(listOf(t.copy(groupId = groupId))) }
+        repository.upsertRules(
+            listOf(
+                Rule(
+                    id = "gq-$groupId",
+                    targetId = TargetId.group(groupId),
+                    type = RuleType.DAILY_QUOTA,
+                    quotaMinutes = 45,
+                    enabled = true,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+                Rule(
+                    id = "gs-$groupId",
+                    targetId = TargetId.group(groupId),
+                    type = RuleType.SCHEDULE_BLOCK,
+                    startHHmm = 900,
+                    endHHmm = 2200,
+                    enabled = true,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+        )
+        Log.i(TAG, "DEFAULT_RULES video group created members=${members.size}")
+    }
+
     /** 配置变更后刷新内存快照并向控制台广播（收紧/放宽/订阅热更新）。 */
     private suspend fun refreshRuntimeConfig() {
         snapTargets = repository.allTargets()
         snapRules = repository.allRules()
         reloadT2()
         usageCache = repository.usageMap(today).toMutableMap()
+        bonusCache = repository.todayBonuses(today).toMutableMap()
         webServer?.hub?.broadcast(buildWsEvent("RULES_CHANGED"))
         webServer?.hub?.broadcast(buildWsEvent("TARGETS_CHANGED"))
     }

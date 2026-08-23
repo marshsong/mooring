@@ -65,6 +65,7 @@ class RuleEngineTest {
         rules: List<Rule>,
         now: LocalDateTime,
         usage: Map<String, Long>,
+        bonus: Map<String, Long> = emptyMap(),
     ) = engine.evaluate(
         RuleEngine.Input(
             target = target,
@@ -72,6 +73,7 @@ class RuleEngineTest {
             rules = rules,
             now = now,
             usageOfToday = { usage[it] ?: 0L },
+            bonusSecondsOfToday = { bonus[it] ?: 0L },
         )
     )
 
@@ -142,6 +144,23 @@ class RuleEngineTest {
         val result = eval(target, listOf(target), rules, at(0, 1), emptyMap())
         assertTrue(result.blocked)
         assertEquals(RuleEngine.BlockReason.ALWAYS_BLOCK, result.reason)
+    }
+
+    // --- Bonus (temporary unlock) ---
+
+    @Test
+    fun `daily quota exhausted but bonus extends allowance`() {
+        val target = appTarget("a", "com.example.a")
+        val rules = listOf(rule("r1", target.targetId, RuleType.DAILY_QUOTA, quotaMinutes = 10))
+        // 已用 10 分钟 = 配额耗尽
+        val exhausted = eval(target, listOf(target), rules, at(10, 0), usage = mapOf(target.targetId to 10 * 60L))
+        assertTrue(exhausted.blocked)
+        // 加 15 分钟 bonus 后 10 分钟不再拦
+        val withBonus = eval(target, listOf(target), rules, at(10, 0), usage = mapOf(target.targetId to 10 * 60L), bonus = mapOf(target.targetId to 15 * 60L))
+        assertFalse(withBonus.blocked)
+        // 用到 25 分钟 = 10 + 15 又耗尽
+        val again = eval(target, listOf(target), rules, at(10, 0), usage = mapOf(target.targetId to 25 * 60L), bonus = mapOf(target.targetId to 15 * 60L))
+        assertTrue(again.blocked)
     }
 
     // --- Disabled target ---

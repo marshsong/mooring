@@ -3,12 +3,16 @@
 
 package io.github.marshsong.mooring.data
 
+import io.github.marshsong.mooring.engine.model.CooldownRecord
+import io.github.marshsong.mooring.engine.model.CooldownStatus
 import io.github.marshsong.mooring.engine.model.EventLog
 import io.github.marshsong.mooring.engine.model.PairedClient
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
+import io.github.marshsong.mooring.engine.model.UnlockRecord
+import io.github.marshsong.mooring.engine.model.UsageDaily
 
 /**
  * 数据访问门面：规则配置（目标/组/规则）与运行数据（用量/事件）。
@@ -53,6 +57,24 @@ interface MooringRepository {
     suspend fun pairedClientCount(): Int
 
     suspend fun deletePairedClient(id: String)
+
+    suspend fun cooldownById(id: String): CooldownRecord?
+
+    suspend fun activeCooldown(): CooldownRecord?
+
+    suspend fun upsertCooldown(record: CooldownRecord)
+
+    suspend fun setCooldownStatus(id: String, status: CooldownStatus)
+
+    /** 当日各目标的临时解锁附加秒数。 */
+    suspend fun todayBonuses(dateStr: String): Map<String, Long>
+
+    suspend fun unlockCountForTarget(dateStr: String, targetId: String): Int
+
+    suspend fun grantUnlock(dateStr: String, targetId: String, bonusSeconds: Long)
+
+    /** 某日期区间内各目标每日用量（看板用）。 */
+    suspend fun usageSeries(dateStart: String, dateEnd: String): List<UsageDaily>
 
     suspend fun usedSeconds(targetId: String, dateStr: String): Long
 

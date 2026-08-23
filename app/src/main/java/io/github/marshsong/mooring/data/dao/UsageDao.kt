@@ -18,6 +18,9 @@ interface UsageDao {
     @Query("SELECT * FROM usage_daily WHERE dateStr = :dateStr")
     suspend fun getForDate(dateStr: String): List<UsageDaily>
 
+    @Query("SELECT * FROM usage_daily WHERE dateStr >= :start AND dateStr <= :end")
+    suspend fun getBetween(start: String, end: String): List<UsageDaily>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(usage: UsageDaily)
 

@@ -11,7 +11,11 @@
     <span class="brand">Mooring 拴马桩</span>
     <span id="statusBadge" class="badge">—</span>
     <span id="readonlyBadge" class="badge hidden">只读模式</span>
+    <span id="focusBadge" class="badge hidden">专注中</span>
+    <span style="flex:1"></span>
+    <button id="btnFocus" class="secondary hidden">深度专注 45 分钟</button>
   </header>
+  <div id="cooldownBar" class="cooldown-bar hidden"></div>
 
   <!-- 配对视图 -->
   <section id="pairView" class="card hidden">
@@ -39,6 +43,7 @@
       <button data-tab="groups">组</button>
       <button data-tab="rules">规则</button>
       <button data-tab="subs">订阅</button>
+      <button data-tab="dashboard">看板</button>
     </nav>
     <main>
       <div id="tab-status" class="tab active"></div>
@@ -46,10 +51,12 @@
       <div id="tab-groups" class="tab"></div>
       <div id="tab-rules" class="tab"></div>
       <div id="tab-subs" class="tab"></div>
+      <div id="tab-dashboard" class="tab"></div>
     </main>
   </section>
 
   <script src="/vendor/jsqr.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

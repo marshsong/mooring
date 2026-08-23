@@ -38,6 +38,8 @@ class RuleEngine {
         val now: LocalDateTime,
         /** 当日某目标已用秒数。 */
         val usageOfToday: (targetId: String) -> Long,
+        /** 当日临时解锁附加额度（秒），仅作用于目标自身 DAILY_QUOTA。 */
+        val bonusSecondsOfToday: (targetId: String) -> Long = { 0L },
     )
 
     fun evaluate(input: Input): EvaluationResult {
@@ -47,9 +49,18 @@ class RuleEngine {
         val enabledRules = input.rules.filter { it.enabled }
         val now = input.now
 
-        // 1. 目标自身规则
+        // 1. 目标自身规则（DAILY_QUOTA 计入今日临时解锁附加额度）
         for (rule in enabledRules.filter { it.targetId == target.targetId }) {
-            if (hits(rule, input.usageOfToday(target.targetId), now)) {
+            val usedSeconds = input.usageOfToday(target.targetId)
+            val hit = when (rule.type) {
+                RuleType.ALWAYS_BLOCK -> true
+                RuleType.DAILY_QUOTA -> {
+                    val quota = (rule.quotaMinutes ?: 0) * 60L + input.bonusSecondsOfToday(target.targetId)
+                    usedSeconds >= quota
+                }
+                RuleType.SCHEDULE_BLOCK -> isWithinSchedule(rule, now)
+            }
+            if (hit) {
                 return EvaluationResult(
                     blocked = true,
                     reason = reasonOf(rule),

@@ -6,7 +6,11 @@ package io.github.marshsong.mooring.web
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import io.github.marshsong.mooring.cooldown.CooldownConflictException
+import io.github.marshsong.mooring.cooldown.CooldownManager
 import io.github.marshsong.mooring.data.MooringRepository
+import io.github.marshsong.mooring.focus.FocusManager
+import io.github.marshsong.mooring.settings.SettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +22,7 @@ import kotlinx.coroutines.launch
 import io.github.marshsong.mooring.engine.DetectorConfig
 import io.github.marshsong.mooring.engine.TargetId
 import io.github.marshsong.mooring.engine.model.BlockAction
+import io.github.marshsong.mooring.engine.model.CooldownRecord
 import io.github.marshsong.mooring.engine.model.PairedClient
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.RuleType
@@ -59,6 +64,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -71,9 +78,13 @@ class WebServer(
     private val context: Context,
     private val repository: MooringRepository,
     private val configProvider: () -> DetectorConfig,
+    private val settings: SettingsStore,
     private val onConfigChanged: suspend () -> Unit,
 ) {
     val hub = EventHub()
+
+    private val focusManager = FocusManager(repository, settings) { onConfigChanged() }
+    private val cooldownManager = CooldownManager(repository, settings, ::applyCooldownAction)
 
     private val serverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var server: ApplicationEngine? = null
@@ -167,6 +178,12 @@ class WebServer(
 
             get("/usage") { context.handleUsage() }
             get("/events") { context.handleEvents() }
+
+            post("/cooldown") { context.handleCooldownRequest() }
+            post("/cooldown/{id}/confirm") { context.handleCooldownConfirm() }
+            post("/cooldown/{id}/cancel") { context.handleCooldownCancel() }
+            post("/focus") { context.handleFocusStart() }
+            post("/unlock") { context.handleUnlockRequest() }
         }
     }
 
@@ -236,6 +253,8 @@ class WebServer(
                     groups = groups,
                     pairedClients = repository.pairedClientCount(),
                     currentClientPaired = currentPaired,
+                    activeCooldown = repository.activeCooldown(),
+                    todayBonuses = repository.todayBonuses(dateStr),
                     serverPort = PORT,
                 )
             )
@@ -297,13 +316,27 @@ class WebServer(
 
     private suspend fun ApplicationCall.handleDisableTarget() {
         if (!checkWrite()) return
+        if (RuntimeStatus.focusActive) return respondFail(HttpStatusCode.Forbidden, "FOCUS_LOCKED")
         val id = parameters["id"] ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
         val existing = repository.allTargets().firstOrNull { it.targetId == id }
             ?: return respondFail(HttpStatusCode.NotFound, "NOT_FOUND")
-        // 停用 = 放宽，M4 接入冷静期；M3 直接应用。
-        repository.upsertTargets(listOf(existing.copy(enabled = false)))
-        onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("targetId" to id, "enabled" to false)))
+        if (!existing.enabled) return respondOk(apiJson.encodeToJsonElement(mapOf("enabled" to false)))
+        // 停用 = 放宽，需走冷静期
+        val payload = buildJsonObject {
+            put("action", "DISABLE_TARGET")
+            put("targetId", existing.targetId)
+        }
+        val preview = buildJsonObject {
+            put("field", "enabled")
+            put("from", true)
+            put("to", false)
+        }
+        val result = try {
+            cooldownManager.request(payload, preview)
+        } catch (e: CooldownConflictException) {
+            return respondFail(HttpStatusCode.Conflict, "COOLDOWN_ACTIVE")
+        }
+        respond(HttpStatusCode.Accepted, ApiResponse(0, "ok", apiJson.encodeToJsonElement(result)))
     }
 
     private suspend fun ApplicationCall.handleCreateGroup() {
@@ -402,26 +435,37 @@ class WebServer(
 
     private suspend fun ApplicationCall.handleUpdateRule() {
         if (!checkWrite()) return
+        if (RuntimeStatus.focusActive) return respondFail(HttpStatusCode.Forbidden, "FOCUS_LOCKED")
         val id = parameters["id"] ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
         val existing = repository.allRules().firstOrNull { it.id == id }
             ?: return respondFail(HttpStatusCode.NotFound, "NOT_FOUND")
         val req = runCatching { receive<RuleRequest>() }.getOrNull()
             ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
-        repository.upsertRules(
-            listOf(
-                existing.copy(
-                    type = req.type(ifBlank = existing.type),
-                    quotaMinutes = req.quotaMinutes ?: existing.quotaMinutes,
-                    startHHmm = req.startHHmm ?: existing.startHHmm,
-                    endHHmm = req.endHHmm ?: existing.endHHmm,
-                    action = req.action(ifBlank = existing.action),
-                    enabled = req.enabled,
-                    updatedAt = System.currentTimeMillis(),
-                )
-            )
+        val updated = existing.copy(
+            type = req.type(ifBlank = existing.type),
+            quotaMinutes = req.quotaMinutes ?: existing.quotaMinutes,
+            startHHmm = req.startHHmm ?: existing.startHHmm,
+            endHHmm = req.endHHmm ?: existing.endHHmm,
+            action = req.action(ifBlank = existing.action),
+            enabled = req.enabled,
+            updatedAt = System.currentTimeMillis(),
         )
-        onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("id" to id)))
+        // 修改规则按放宽处理，走冷静期
+        val payload = buildJsonObject {
+            put("action", "SET_RULE")
+            put("ruleId", updated.id)
+            put("rule", apiJson.encodeToJsonElement(updated))
+        }
+        val preview = buildJsonObject {
+            put("field", "rule")
+            put("ruleId", updated.id)
+        }
+        val result = try {
+            cooldownManager.request(payload, preview)
+        } catch (e: CooldownConflictException) {
+            return respondFail(HttpStatusCode.Conflict, "COOLDOWN_ACTIVE")
+        }
+        respond(HttpStatusCode.Accepted, ApiResponse(0, "ok", apiJson.encodeToJsonElement(result)))
     }
 
     private suspend fun ApplicationCall.handleDeleteRule() {
@@ -462,6 +506,7 @@ class WebServer(
     }
 
     private suspend fun ApplicationCall.handleUsage() {
+        val days = (request.queryParameters["days"]?.toIntOrNull() ?: 1).coerceIn(1, 90)
         val dateStr = LocalDate.now().format(ISO_DATE)
         val targets = repository.allTargets()
         val groups = repository.allGroups()
@@ -469,12 +514,138 @@ class WebServer(
         val groupUsage = groups.associate { g ->
             g.id to targets.filter { it.enabled && it.groupId == g.id }.sumOf { usage[it.targetId] ?: 0L }
         }
-        respondOk(apiJson.encodeToJsonElement(UsageDto(date = dateStr, targets = usage, groups = groupUsage)))
+        if (days == 1) {
+            respondOk(apiJson.encodeToJsonElement(UsageDto(date = dateStr, targets = usage, groups = groupUsage)))
+        } else {
+            val end = LocalDate.now()
+            val start = end.minusDays((days - 1).toLong())
+            val series = repository.usageSeries(start.format(ISO_DATE), end.format(ISO_DATE))
+            val byDay = series.groupBy { it.dateStr }
+            val daysDto = (0 until days).map { offset ->
+                val d = end.minusDays((days - 1 - offset).toLong())
+                val dayRecords = byDay[d.format(ISO_DATE)] ?: emptyList()
+                DayUsageDto(date = d.format(ISO_DATE), targets = dayRecords.associate { it.targetId to it.usedSeconds })
+            }
+            respondOk(apiJson.encodeToJsonElement(UsageSeriesDto(days = daysDto)))
+        }
     }
 
     private suspend fun ApplicationCall.handleEvents() {
         val limit = (request.queryParameters["limit"]?.toIntOrNull() ?: 50).coerceIn(1, 200)
         respondOk(apiJson.encodeToJsonElement(repository.recentEvents(limit)))
+    }
+
+    // ---------------- 冷静期 / 专注 / 临时解锁 ----------------
+
+    private suspend fun ApplicationCall.handleCooldownRequest() {
+        if (!checkWrite()) return
+        if (RuntimeStatus.focusActive) return respondFail(HttpStatusCode.Forbidden, "FOCUS_LOCKED")
+        val req = runCatching { receive<CooldownRequest>() }.getOrNull()
+            ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
+        val payload = buildJsonObject {
+            put("type", req.type)
+            req.targetId?.let { put("targetId", it) }
+            req.ruleId?.let { put("ruleId", it) }
+            req.patch?.let { put("patch", it) }
+            req.reason?.let { put("reason", it) }
+        }
+        val result = try {
+            cooldownManager.request(payload, null)
+        } catch (e: CooldownConflictException) {
+            return respondFail(HttpStatusCode.Conflict, "COOLDOWN_ACTIVE")
+        }
+        respond(HttpStatusCode.Accepted, ApiResponse(0, "ok", apiJson.encodeToJsonElement(result)))
+    }
+
+    private suspend fun ApplicationCall.handleCooldownConfirm() {
+        if (!checkWrite()) return
+        val id = parameters["id"] ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
+        when (cooldownManager.confirm(id)) {
+            CooldownManager.ConfirmResult.Confirmed -> {
+                onConfigChanged()
+                respondOk(apiJson.encodeToJsonElement(mapOf("confirmed" to true)))
+            }
+            CooldownManager.ConfirmResult.Expired ->
+                respondFail(HttpStatusCode.Gone, "COOLDOWN_EXPIRED")
+            CooldownManager.ConfirmResult.Waiting ->
+                respondFail(HttpStatusCode.Conflict, "COOLDOWN_WAITING")
+            else -> respondFail(HttpStatusCode.NotFound, "NOT_FOUND")
+        }
+    }
+
+    private suspend fun ApplicationCall.handleCooldownCancel() {
+        if (!checkWrite()) return
+        val id = parameters["id"] ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
+        val cancelled = cooldownManager.cancel(id)
+        if (!cancelled) return respondFail(HttpStatusCode.NotFound, "NOT_FOUND")
+        onConfigChanged()
+        respondOk(apiJson.encodeToJsonElement(mapOf("cancelled" to true)))
+    }
+
+    private suspend fun ApplicationCall.handleFocusStart() {
+        if (!checkWrite()) return
+        val req = runCatching { receive<FocusRequest>() }.getOrNull()
+        val minutes = req?.minutes ?: settings.focusDefaultMinutes
+        focusManager.start(minutes)
+        respondOk(
+            apiJson.encodeToJsonElement(
+                mapOf("active" to true, "minutes" to minutes, "remainingSeconds" to focusManager.remainingSeconds())
+            )
+        )
+    }
+
+    private suspend fun ApplicationCall.handleUnlockRequest() {
+        if (!checkWrite()) return
+        if (RuntimeStatus.focusActive) return respondFail(HttpStatusCode.Forbidden, "FOCUS_LOCKED")
+        val req = runCatching { receive<UnlockRequest>() }.getOrNull()
+            ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
+        val dateStr = LocalDate.now().format(ISO_DATE)
+        val used = repository.unlockCountForTarget(dateStr, req.targetId)
+        if (used >= settings.extraUnlockMaxPerDay) {
+            return respondFail(HttpStatusCode.Forbidden, "UNLOCK_LIMIT")
+        }
+        val extraSeconds = (req.minutes ?: 15).coerceIn(1, 60) * 60L
+        val payload = buildJsonObject {
+            put("action", "GRANT_UNLOCK")
+            put("targetId", req.targetId)
+            put("extraSeconds", extraSeconds)
+        }
+        val preview = buildJsonObject {
+            put("field", "bonusSeconds")
+            put("to", extraSeconds)
+        }
+        val result = try {
+            cooldownManager.request(payload, preview)
+        } catch (e: CooldownConflictException) {
+            return respondFail(HttpStatusCode.Conflict, "COOLDOWN_ACTIVE")
+        }
+        respond(HttpStatusCode.Accepted, ApiResponse(0, "ok", apiJson.encodeToJsonElement(result)))
+    }
+
+    private suspend fun applyCooldownAction(payload: JsonObject): Boolean {
+        val action = payload["action"]?.jsonPrimitive?.content ?: return false
+        return when (action) {
+            "DISABLE_TARGET" -> {
+                val targetId = payload["targetId"]?.jsonPrimitive?.content ?: return false
+                val t = repository.allTargets().firstOrNull { it.targetId == targetId } ?: return false
+                repository.upsertTargets(listOf(t.copy(enabled = false)))
+                true
+            }
+            "SET_RULE" -> {
+                val ruleId = payload["ruleId"]?.jsonPrimitive?.content ?: return false
+                val ruleJson = payload["rule"] ?: return false
+                val rule = apiJson.decodeFromJsonElement(Rule.serializer(), ruleJson)
+                repository.upsertRules(listOf(rule.copy(id = ruleId, updatedAt = System.currentTimeMillis())))
+                true
+            }
+            "GRANT_UNLOCK" -> {
+                val targetId = payload["targetId"]?.jsonPrimitive?.content ?: return false
+                val seconds = payload["extraSeconds"]?.jsonPrimitive?.longOrNull ?: 15 * 60L
+                repository.grantUnlock(LocalDate.now().format(ISO_DATE), targetId, seconds)
+                true
+            }
+            else -> false
+        }
     }
 
     // ---------------- WebSocket ----------------
@@ -570,6 +741,27 @@ class WebServer(
     data class SubscriptionToggleRequest(val enabled: Boolean)
 
     @Serializable
+    data class CooldownRequest(
+        val type: String = "",
+        val targetId: String? = null,
+        val ruleId: String? = null,
+        val patch: JsonElement? = null,
+        val reason: String? = null,
+    )
+
+    @Serializable
+    data class FocusRequest(val minutes: Int? = null)
+
+    @Serializable
+    data class UnlockRequest(val targetId: String, val minutes: Int? = null)
+
+    @Serializable
+    data class UsageSeriesDto(val days: List<DayUsageDto>)
+
+    @Serializable
+    data class DayUsageDto(val date: String, val targets: Map<String, Long>)
+
+    @Serializable
     data class StatusDto(
         val moored: Boolean,
         val accessibilityEnabled: Boolean,
@@ -582,6 +774,8 @@ class WebServer(
         val groups: List<TargetGroup>,
         val pairedClients: Int,
         val currentClientPaired: Boolean,
+        val activeCooldown: CooldownRecord?,
+        val todayBonuses: Map<String, Long>,
         val serverPort: Int,
     )
 

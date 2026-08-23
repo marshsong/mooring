@@ -4,12 +4,15 @@
 package io.github.marshsong.mooring.data
 
 import androidx.room.withTransaction
+import io.github.marshsong.mooring.engine.model.CooldownRecord
+import io.github.marshsong.mooring.engine.model.CooldownStatus
 import io.github.marshsong.mooring.engine.model.EventLog
 import io.github.marshsong.mooring.engine.model.PairedClient
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
+import io.github.marshsong.mooring.engine.model.UnlockRecord
 import io.github.marshsong.mooring.engine.model.UsageDaily
 
 /** Room 实现的仓库。 */
@@ -36,6 +39,39 @@ class RoomMooringRepository(private val db: MooringDatabase) : MooringRepository
     }
 
     override suspend fun recentEvents(limit: Int): List<EventLog> = db.eventDao().getRecent(limit)
+
+    override suspend fun cooldownById(id: String): CooldownRecord? = db.cooldownDao().getById(id)
+
+    override suspend fun activeCooldown(): CooldownRecord? =
+        db.cooldownDao().getLatestByStatus(CooldownStatus.PENDING)
+
+    override suspend fun upsertCooldown(record: CooldownRecord) {
+        db.cooldownDao().upsert(record)
+    }
+
+    override suspend fun setCooldownStatus(id: String, status: CooldownStatus) {
+        db.cooldownDao().setStatus(id, status)
+    }
+
+    override suspend fun todayBonuses(dateStr: String): Map<String, Long> =
+        db.unlockDao().getForDate(dateStr).associate { it.targetId to it.bonusSeconds }
+
+    override suspend fun unlockCountForTarget(dateStr: String, targetId: String): Int =
+        db.unlockDao().countForTarget(dateStr, targetId)
+
+    override suspend fun grantUnlock(dateStr: String, targetId: String, bonusSeconds: Long) {
+        db.unlockDao().upsert(
+            UnlockRecord(
+                dateStr = dateStr,
+                targetId = targetId,
+                bonusSeconds = bonusSeconds,
+                grantedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    override suspend fun usageSeries(dateStart: String, dateEnd: String): List<UsageDaily> =
+        db.usageDao().getBetween(dateStart, dateEnd)
 
     override suspend fun subscriptions(): List<Subscription> = db.subscriptionDao().getAll()
 

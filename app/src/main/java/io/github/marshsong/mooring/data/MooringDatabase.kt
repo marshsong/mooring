@@ -8,12 +8,14 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import io.github.marshsong.mooring.data.dao.CooldownDao
 import io.github.marshsong.mooring.data.dao.EventDao
 import io.github.marshsong.mooring.data.dao.GroupDao
 import io.github.marshsong.mooring.data.dao.PairedClientDao
 import io.github.marshsong.mooring.data.dao.RuleDao
 import io.github.marshsong.mooring.data.dao.SubscriptionDao
 import io.github.marshsong.mooring.data.dao.TargetDao
+import io.github.marshsong.mooring.data.dao.UnlockDao
 import io.github.marshsong.mooring.data.dao.UsageDao
 import io.github.marshsong.mooring.engine.model.CooldownRecord
 import io.github.marshsong.mooring.engine.model.EventLog
@@ -22,6 +24,7 @@ import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
+import io.github.marshsong.mooring.engine.model.UnlockRecord
 import io.github.marshsong.mooring.engine.model.UsageDaily
 
 @Database(
@@ -34,8 +37,9 @@ import io.github.marshsong.mooring.engine.model.UsageDaily
         CooldownRecord::class,
         PairedClient::class,
         Subscription::class,
+        UnlockRecord::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -48,6 +52,8 @@ abstract class MooringDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun subscriptionDao(): SubscriptionDao
     abstract fun pairedClientDao(): PairedClientDao
+    abstract fun cooldownDao(): CooldownDao
+    abstract fun unlockDao(): UnlockDao
 
     companion object {
         @Volatile
@@ -59,7 +65,7 @@ abstract class MooringDatabase : RoomDatabase() {
                     context.applicationContext,
                     MooringDatabase::class.java,
                     "mooring.db",
-                ).build().also { instance = it }
+                ).fallbackToDestructiveMigration().build().also { instance = it }
             }
     }
 }

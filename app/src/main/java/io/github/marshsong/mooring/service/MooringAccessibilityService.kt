@@ -10,10 +10,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import io.github.marshsong.mooring.AppRuntime
 import io.github.marshsong.mooring.block.BlockManager
-import io.github.marshsong.mooring.data.MooringDatabase
 import io.github.marshsong.mooring.data.MooringRepository
-import io.github.marshsong.mooring.data.RoomMooringRepository
 import io.github.marshsong.mooring.detect.T2ContentScanner
 import io.github.marshsong.mooring.detect.UsageTracker
 import io.github.marshsong.mooring.engine.DetectorConfig
@@ -29,11 +28,9 @@ import io.github.marshsong.mooring.engine.model.TargetGroup
 import io.github.marshsong.mooring.engine.model.TargetKind
 import io.github.marshsong.mooring.engine.model.TargetSource
 import io.github.marshsong.mooring.engine.t2.T2Detector
-import io.github.marshsong.mooring.settings.SettingsStore
 import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.ui.ReinActivity
 import io.github.marshsong.mooring.web.RuntimeStatus
-import io.github.marshsong.mooring.web.WebServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -65,9 +62,7 @@ class MooringAccessibilityService : AccessibilityService() {
 
     private lateinit var repository: MooringRepository
     private lateinit var blockManager: BlockManager
-    private var webServer: WebServer? = null
 
-    private lateinit var settings: SettingsStore
     private var config: DetectorConfig? = null
     private var snapTargets: List<Target> = emptyList()
     private var snapRules: List<Rule> = emptyList()
@@ -79,9 +74,14 @@ class MooringAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        repository = RoomMooringRepository(MooringDatabase.get(this))
-        settings = SettingsStore(this)
+        AppRuntime.init(this)
         config = loadConfig()
+        AppRuntime.detectorConfig = config
+        repository = AppRuntime.repository
+        AppRuntime.onConfigChanged = { refreshRuntimeConfig() }
+        AppRuntime.ensureServerStarted(this)
+        RuntimeStatus.moored = true
+        RuntimeStatus.accessibilityEnabled = true
         blockManager = BlockManager(
             startRein = { target, reason -> startRein(target, reason) },
             performBack = { performGlobalAction(GLOBAL_ACTION_BACK) },
@@ -92,17 +92,6 @@ class MooringAccessibilityService : AccessibilityService() {
             nowLocal = { LocalDateTime.now() },
             onAccumulate = { targetId, seconds, dateStr -> onUsageAccumulated(targetId, seconds, dateStr) },
         )
-
-        webServer = WebServer(
-            context = this,
-            repository = repository,
-            configProvider = { config ?: DetectorConfig() },
-            settings = settings,
-            onConfigChanged = { refreshRuntimeConfig() },
-        )
-        webServer?.start()
-        RuntimeStatus.moored = true
-        RuntimeStatus.accessibilityEnabled = true
 
         scope.launch {
             bootstrapDevIfFirstRun()
@@ -205,7 +194,7 @@ class MooringAccessibilityService : AccessibilityService() {
         tracker?.flush()
         handler.removeCallbacksAndMessages(null)
         contentHandler.removeCallbacksAndMessages(null)
-        webServer?.stop()
+        // server owned by AppRuntime, kept alive by foreground service
         RuntimeStatus.moored = false
         scope.cancel()
         super.onDestroy()
@@ -240,7 +229,7 @@ class MooringAccessibilityService : AccessibilityService() {
                 "reason=${result.reason} source=${result.source}",
             )
             Log.i(TAG, "BLOCKED target=${target.targetId} reason=${result.reason} rule=${result.ruleId}")
-            webServer?.hub?.let { hub ->
+            AppRuntime.webServer?.hub?.let { hub ->
                 scope.launch { hub.broadcast(buildWsEvent("BLOCKED")) }
             }
         }
@@ -461,8 +450,8 @@ class MooringAccessibilityService : AccessibilityService() {
         reloadT2()
         usageCache = repository.usageMap(today).toMutableMap()
         bonusCache = repository.todayBonuses(today).toMutableMap()
-        webServer?.hub?.broadcast(buildWsEvent("RULES_CHANGED"))
-        webServer?.hub?.broadcast(buildWsEvent("TARGETS_CHANGED"))
+        AppRuntime.webServer?.hub?.broadcast(buildWsEvent("RULES_CHANGED"))
+        AppRuntime.webServer?.hub?.broadcast(buildWsEvent("TARGETS_CHANGED"))
     }
 
     private fun buildWsEvent(type: String): String = kotlinx.serialization.json.buildJsonObject {

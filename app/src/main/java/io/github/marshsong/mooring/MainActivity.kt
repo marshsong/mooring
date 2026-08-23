@@ -11,7 +11,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.wifi.WifiManager
+import android.Manifest
+import android.app.NotificationManager
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -28,13 +33,12 @@ import android.widget.Toast
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
-import io.github.marshsong.mooring.data.MooringDatabase
 import io.github.marshsong.mooring.data.MooringRepository
-import io.github.marshsong.mooring.data.RoomMooringRepository
 import io.github.marshsong.mooring.engine.TargetId
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.RuleType
 import io.github.marshsong.mooring.service.MooringAccessibilityService
+import io.github.marshsong.mooring.service.MooringForegroundService
 import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.web.RuntimeStatus
 import io.github.marshsong.mooring.web.TokenManager
@@ -65,9 +69,23 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = RoomMooringRepository(MooringDatabase.get(this))
+        AppRuntime.init(this)
+        repository = AppRuntime.repository
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(Intent(this, MooringForegroundService::class.java))
+        }
+        requestNotificationPermission()
         setContentView(buildRoot())
         switchTab("guide")
+    }
+
+    /** API 33+ 运行时请求通知权限（保活通知需要）。 */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+        }
     }
 
     override fun onResume() {
@@ -154,7 +172,50 @@ class MainActivity : Activity() {
         button(guideView, "复制 adb 命令") {
             copy("adb forward tcp:${WebServer.PORT} tcp:${WebServer.PORT}")
         }
+
+        renderSelfCheck()
     }
+
+    /** 运行自检（华为专项红绿灯）：无障碍 / 通知 / 电池白名单 / Web 服务。 */
+    private fun renderSelfCheck() {
+        section(guideView, "运行自检（华为保活）")
+
+        val accessibilityOn = MooringAccessibilityService.isAccessibilityEnabled(this)
+        statusLine(guideView, check(accessibilityOn) + "无障碍")
+        if (!accessibilityOn) button(guideView, "开启无障碍") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+
+        val notifyOn = runCatching {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= 24) nm.areNotificationsEnabled() else true
+        }.getOrDefault(false)
+        statusLine(guideView, check(notifyOn) + "通知权限（保活通知）")
+        if (!notifyOn) button(guideView, "开启通知权限") {
+            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        }
+
+        val batteryOk = runCatching {
+            val pm = getSystemService(PowerManager::class.java)
+            pm.isIgnoringBatteryOptimizations(packageName)
+        }.getOrDefault(false)
+        statusLine(guideView, check(batteryOk) + "电池白名单（忽略电池优化）")
+        if (!batteryOk) button(guideView, "电池优化设置") {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(android.net.Uri.parse("package:$packageName"))
+            )
+        }
+
+        val serverOk = AppRuntime.webServer?.isRunning == true
+        statusLine(guideView, check(serverOk) + "Web 服务（端口 ${WebServer.PORT}）")
+
+        statusLine(guideView, "• 启动管理：设置 → 应用和服务 → 应用启动管理 → Mooring → 关闭自动管理、手动允许三项（华为无公开 API，需手动确认）")
+        statusLine(guideView, "• 多任务加锁：最近任务卡片下拉出现锁图标")
+        statusLine(guideView, "全绿才算完成保活引导")
+    }
+
+    private fun check(ok: Boolean): String =
+        if (ok) "🟢 " else "🔴 "
 
     private fun qrContent(token: String): String {
         val ip = lanIp() ?: ""

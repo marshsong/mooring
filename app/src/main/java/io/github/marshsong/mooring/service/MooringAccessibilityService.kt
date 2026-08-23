@@ -98,6 +98,7 @@ class MooringAccessibilityService : AccessibilityService() {
         scope.launch {
             bootstrapDevIfFirstRun()
             ensureDefaultRules()
+            cleanupStaleFocusRules()
             snapTargets = repository.allTargets()
             snapRules = repository.allRules()
             reloadT2()
@@ -420,6 +421,17 @@ class MooringAccessibilityService : AccessibilityService() {
     private suspend fun reloadT2() {
         detector.load(repository.enabledSubscriptions())
         Log.i(TAG, "T2_LOAD features=${detector.featureCount} packages=${detector.packages().size}")
+    }
+
+    /** 启动清理：移除残留的专注临时规则（进程被杀导致 end() 未跑时）。 */
+    private suspend fun cleanupStaleFocusRules() {
+        val stale = repository.allRules().filter { it.id.startsWith("focus-") }
+        stale.forEach { repository.deleteRule(it.id) }
+        if (stale.isNotEmpty()) {
+            RuntimeStatus.focusActive = false
+            RuntimeStatus.focusRemainingSeconds = 0
+            Log.i(TAG, "FOCUS cleaned ${stale.size} stale rules")
+        }
     }
 
     /** 默认规则 v2（F9）：无任何组时自动建"视频组"，纳入已启用视频类目标与 FUNC 目标。 */

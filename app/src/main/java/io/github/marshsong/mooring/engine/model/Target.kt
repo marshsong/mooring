@@ -3,6 +3,9 @@
 
 package io.github.marshsong.mooring.engine.model
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
 /** 目标形态：APP 整应用（T1）/ FUNC 应用内功能（T2）。 */
 enum class TargetKind { APP, FUNC }
 
@@ -15,8 +18,9 @@ enum class TargetSource { CATALOG, CUSTOM, SUBSCRIPTION }
  * targetId 遵循术语表形态：`APP:<package>`、`FUNC:<package>:<featureId>`。
  * 组规则以 `GROUP:<groupId>` 作为规则作用对象（见 Rule）。
  */
+@Entity(tableName = "targets")
 data class Target(
-    val targetId: String,
+    @PrimaryKey val targetId: String,
     val label: String,
     val kind: TargetKind,
     val packageName: String,

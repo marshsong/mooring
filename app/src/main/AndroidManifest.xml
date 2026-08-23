@@ -15,6 +15,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.ReinActivity"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Mooring.Rein" />
+
         <service
             android:name=".service.MooringAccessibilityService"
             android:label="@string/accessibility_service_name"

@@ -7,4 +7,11 @@
     <string name="main_status_ready">无障碍服务未开启。请开启后本应用才能开始检测。</string>
     <string name="main_status_active">无障碍服务运行中：T1 应用级检测已就绪。</string>
     <string name="main_btn_open_accessibility">开启无障碍</string>
+
+    <string name="rein_default">该目标当前不可用</string>
+    <string name="rein_quota_exhausted">今日额度已用完，剩余可申请时间：明日 00:00</string>
+    <string name="rein_schedule_block">当前为禁用时段</string>
+    <string name="rein_always_block">此功能已永久禁用</string>
+    <string name="rein_footer">规则修改请前往电脑控制台</string>
+    <string name="rein_horse_emoji_desc">拴马桩</string>
 </resources>

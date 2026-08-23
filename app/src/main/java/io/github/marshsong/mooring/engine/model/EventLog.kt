@@ -3,6 +3,9 @@
 
 package io.github.marshsong.mooring.engine.model
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
 /** 事件类型（存储与 WebSocket 共用语义；事件只记目标与规则，不记页面内容）。 */
 enum class EventType {
     SERVICE_STATUS,
@@ -16,8 +19,9 @@ enum class EventType {
 }
 
 /** 事件日志。保留 90 天，启动时清理。 */
+@Entity(tableName = "event_log")
 data class EventLog(
-    val id: Long,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val ts: Long,
     val type: EventType,
     val targetId: String? = null,

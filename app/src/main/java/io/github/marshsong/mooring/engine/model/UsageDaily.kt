@@ -3,10 +3,13 @@
 
 package io.github.marshsong.mooring.engine.model
 
+import androidx.room.Entity
+
 /**
  * 单目标每日用量。主键 (dateStr, targetId)。
  * dateStr = yyyy-MM-dd（本地时区）；组用量 = 成员当日用量求和。
  */
+@Entity(tableName = "usage_daily", primaryKeys = ["dateStr", "targetId"])
 data class UsageDaily(
     val dateStr: String,
     val targetId: String,

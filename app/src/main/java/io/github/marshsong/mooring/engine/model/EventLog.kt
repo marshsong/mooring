@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.engine.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 /** 事件类型（存储与 WebSocket 共用语义；事件只记目标与规则，不记页面内容）。 */
 enum class EventType {
@@ -20,6 +21,7 @@ enum class EventType {
 
 /** 事件日志。保留 90 天，启动时清理。 */
 @Entity(tableName = "event_log")
+@Serializable
 data class EventLog(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val ts: Long,

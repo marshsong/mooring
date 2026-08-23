@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.data
 
 import androidx.room.withTransaction
 import io.github.marshsong.mooring.engine.model.EventLog
+import io.github.marshsong.mooring.engine.model.PairedClient
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
@@ -22,12 +23,41 @@ class RoomMooringRepository(private val db: MooringDatabase) : MooringRepository
         if (rules.isNotEmpty()) db.ruleDao().upsertAll(rules)
     }
 
+    override suspend fun upsertGroups(groups: List<TargetGroup>) {
+        if (groups.isNotEmpty()) db.groupDao().upsertAll(groups)
+    }
+
+    override suspend fun deleteGroup(id: String) {
+        db.groupDao().delete(id)
+    }
+
+    override suspend fun deleteRule(id: String) {
+        db.ruleDao().delete(id)
+    }
+
+    override suspend fun recentEvents(limit: Int): List<EventLog> = db.eventDao().getRecent(limit)
+
     override suspend fun subscriptions(): List<Subscription> = db.subscriptionDao().getAll()
 
     override suspend fun enabledSubscriptions(): List<Subscription> = db.subscriptionDao().getEnabled()
 
     override suspend fun upsertSubscription(subscription: Subscription) {
         db.subscriptionDao().upsert(subscription)
+    }
+
+    override suspend fun pairedClients(): List<PairedClient> = db.pairedClientDao().getAll()
+
+    override suspend fun pairedClientByUserAgent(userAgent: String): PairedClient? =
+        db.pairedClientDao().getByUserAgent(userAgent)
+
+    override suspend fun upsertPairedClient(client: PairedClient) {
+        db.pairedClientDao().upsert(client)
+    }
+
+    override suspend fun pairedClientCount(): Int = db.pairedClientDao().count()
+
+    override suspend fun deletePairedClient(id: String) {
+        db.pairedClientDao().delete(id)
     }
 
     override suspend fun enabledTargets(): List<Target> = db.targetDao().getEnabled()

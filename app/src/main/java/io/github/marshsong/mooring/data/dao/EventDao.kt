@@ -14,6 +14,9 @@ interface EventDao {
     @Insert
     suspend fun insert(event: EventLog): Long
 
+    @Query("SELECT * FROM event_log ORDER BY ts DESC LIMIT :limit")
+    suspend fun getRecent(limit: Int): List<EventLog>
+
     @Query("DELETE FROM event_log WHERE ts < :beforeTs")
     suspend fun deleteOlderThan(beforeTs: Long): Int
 }

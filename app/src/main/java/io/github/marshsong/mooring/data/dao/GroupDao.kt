@@ -18,6 +18,12 @@ interface GroupDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(groups: List<TargetGroup>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(group: TargetGroup)
+
+    @Query("DELETE FROM target_groups WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Query("DELETE FROM target_groups")
     suspend fun clear()
 }

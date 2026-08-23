@@ -4,6 +4,7 @@
 package io.github.marshsong.mooring.data
 
 import io.github.marshsong.mooring.engine.model.EventLog
+import io.github.marshsong.mooring.engine.model.PairedClient
 import io.github.marshsong.mooring.engine.model.Rule
 import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
@@ -29,11 +30,29 @@ interface MooringRepository {
     /** 追加/覆盖规则（订阅导入等增量场景）。 */
     suspend fun upsertRules(rules: List<Rule>)
 
+    suspend fun upsertGroups(groups: List<TargetGroup>)
+
+    suspend fun deleteGroup(id: String)
+
+    suspend fun deleteRule(id: String)
+
+    suspend fun recentEvents(limit: Int): List<EventLog>
+
     suspend fun subscriptions(): List<Subscription>
 
     suspend fun enabledSubscriptions(): List<Subscription>
 
     suspend fun upsertSubscription(subscription: Subscription)
+
+    suspend fun pairedClients(): List<PairedClient>
+
+    suspend fun pairedClientByUserAgent(userAgent: String): PairedClient?
+
+    suspend fun upsertPairedClient(client: PairedClient)
+
+    suspend fun pairedClientCount(): Int
+
+    suspend fun deletePairedClient(id: String)
 
     suspend fun usedSeconds(targetId: String, dateStr: String): Long
 

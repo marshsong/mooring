@@ -31,6 +31,8 @@ import io.github.marshsong.mooring.engine.model.TargetSource
 import io.github.marshsong.mooring.engine.t2.T2Detector
 import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.ui.ReinActivity
+import io.github.marshsong.mooring.web.RuntimeStatus
+import io.github.marshsong.mooring.web.WebServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.put
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -61,6 +64,7 @@ class MooringAccessibilityService : AccessibilityService() {
 
     private lateinit var repository: MooringRepository
     private lateinit var blockManager: BlockManager
+    private var webServer: WebServer? = null
 
     private var config: DetectorConfig? = null
     private var snapTargets: List<Target> = emptyList()
@@ -84,6 +88,16 @@ class MooringAccessibilityService : AccessibilityService() {
             nowLocal = { LocalDateTime.now() },
             onAccumulate = { targetId, seconds, dateStr -> onUsageAccumulated(targetId, seconds, dateStr) },
         )
+
+        webServer = WebServer(
+            context = this,
+            repository = repository,
+            configProvider = { config ?: DetectorConfig() },
+            onConfigChanged = { refreshRuntimeConfig() },
+        )
+        webServer?.start()
+        RuntimeStatus.moored = true
+        RuntimeStatus.accessibilityEnabled = true
 
         scope.launch {
             bootstrapDevIfFirstRun()
@@ -184,6 +198,8 @@ class MooringAccessibilityService : AccessibilityService() {
         tracker?.flush()
         handler.removeCallbacksAndMessages(null)
         contentHandler.removeCallbacksAndMessages(null)
+        webServer?.stop()
+        RuntimeStatus.moored = false
         scope.cancel()
         super.onDestroy()
     }
@@ -216,6 +232,9 @@ class MooringAccessibilityService : AccessibilityService() {
                 "reason=${result.reason} source=${result.source}",
             )
             Log.i(TAG, "BLOCKED target=${target.targetId} reason=${result.reason} rule=${result.ruleId}")
+            webServer?.hub?.let { hub ->
+                scope.launch { hub.broadcast(buildWsEvent("BLOCKED")) }
+            }
         }
         return result.blocked
     }
@@ -385,6 +404,21 @@ class MooringAccessibilityService : AccessibilityService() {
         detector.load(repository.enabledSubscriptions())
         Log.i(TAG, "T2_LOAD features=${detector.featureCount} packages=${detector.packages().size}")
     }
+
+    /** 配置变更后刷新内存快照并向控制台广播（收紧/放宽/订阅热更新）。 */
+    private suspend fun refreshRuntimeConfig() {
+        snapTargets = repository.allTargets()
+        snapRules = repository.allRules()
+        reloadT2()
+        usageCache = repository.usageMap(today).toMutableMap()
+        webServer?.hub?.broadcast(buildWsEvent("RULES_CHANGED"))
+        webServer?.hub?.broadcast(buildWsEvent("TARGETS_CHANGED"))
+    }
+
+    private fun buildWsEvent(type: String): String = kotlinx.serialization.json.buildJsonObject {
+        put("type", type)
+        put("ts", System.currentTimeMillis())
+    }.toString()
 
     private fun loadDevSeed(): DevSeed? {
         val jsonText = try {

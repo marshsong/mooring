@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.engine.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 /** 冷静期状态。 */
 enum class CooldownStatus { PENDING, CONFIRMED, CANCELLED, EXPIRED }
@@ -14,6 +15,7 @@ enum class CooldownStatus { PENDING, CONFIRMED, CANCELLED, EXPIRED }
  * payloadJson 记录发起时的变更描述（如规则 ID 与新旧值）。
  */
 @Entity(tableName = "cooldown_records")
+@Serializable
 data class CooldownRecord(
     @PrimaryKey val id: String,
     val payloadJson: String,

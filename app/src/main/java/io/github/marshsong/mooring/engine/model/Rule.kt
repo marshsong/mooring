@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.engine.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 /** 规则类型：每日限额 / 时段禁用 / 永久禁用。 */
 enum class RuleType { DAILY_QUOTA, SCHEDULE_BLOCK, ALWAYS_BLOCK }
@@ -19,6 +20,7 @@ enum class BlockAction { OVERLAY_ONLY, OVERLAY_AND_BACK }
  * startHHmm / endHHmm 为整型时分（如 900 表示 09:00），支持跨零点。
  */
 @Entity(tableName = "rules")
+@Serializable
 data class Rule(
     @PrimaryKey val id: String,
     val targetId: String,

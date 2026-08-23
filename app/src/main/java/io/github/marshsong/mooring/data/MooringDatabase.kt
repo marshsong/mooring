@@ -10,6 +10,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import io.github.marshsong.mooring.data.dao.EventDao
 import io.github.marshsong.mooring.data.dao.GroupDao
+import io.github.marshsong.mooring.data.dao.PairedClientDao
 import io.github.marshsong.mooring.data.dao.RuleDao
 import io.github.marshsong.mooring.data.dao.SubscriptionDao
 import io.github.marshsong.mooring.data.dao.TargetDao
@@ -46,6 +47,7 @@ abstract class MooringDatabase : RoomDatabase() {
     abstract fun usageDao(): UsageDao
     abstract fun eventDao(): EventDao
     abstract fun subscriptionDao(): SubscriptionDao
+    abstract fun pairedClientDao(): PairedClientDao
 
     companion object {
         @Volatile

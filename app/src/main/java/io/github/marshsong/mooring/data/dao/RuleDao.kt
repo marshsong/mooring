@@ -18,6 +18,12 @@ interface RuleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(rules: List<Rule>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(rule: Rule)
+
+    @Query("DELETE FROM rules WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Query("DELETE FROM rules")
     suspend fun clear()
 }

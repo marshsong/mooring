@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.engine.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 /** 目标形态：APP 整应用（T1）/ FUNC 应用内功能（T2）。 */
 enum class TargetKind { APP, FUNC }
@@ -19,6 +20,7 @@ enum class TargetSource { CATALOG, CUSTOM, SUBSCRIPTION }
  * 组规则以 `GROUP:<groupId>` 作为规则作用对象（见 Rule）。
  */
 @Entity(tableName = "targets")
+@Serializable
 data class Target(
     @PrimaryKey val targetId: String,
     val label: String,

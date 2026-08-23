@@ -1,0 +1,14 @@
+{
+  "configVersion": 2,
+  "detectionDebounceMs": 300,
+  "excludedPackages": [],
+  "appCatalog": [
+    { "package": "com.ss.android.ugc.aweme", "label": "Douyin", "category": "video" },
+    { "package": "com.smile.gifmaker", "label": "Kuaishou", "category": "video" },
+    { "package": "tv.danmaku.bili", "label": "Bilibili", "category": "video" },
+    { "package": "com.xingin.xhs", "label": "RED", "category": "video" },
+    { "package": "com.google.android.youtube", "label": "YouTube", "category": "video" },
+    { "package": "com.zhiliaoapp.musically", "label": "TikTok", "category": "video" },
+    { "package": "com.instagram.android", "label": "Instagram", "category": "social" }
+  ]
+}

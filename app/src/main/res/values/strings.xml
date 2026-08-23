@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mooring</string>
+    <string name="accessibility_service_name">Mooring 守护</string>
+    <string name="accessibility_service_description">检测前台应用并按电脑端规则累计用量。本阶段仅记录日志，不执行拦截。</string>
+    <string name="main_status_loading">读取配置中…</string>
+    <string name="main_status_ready">无障碍服务未开启。请开启后本应用才能开始检测。</string>
+    <string name="main_status_active">无障碍服务运行中：T1 应用级检测已就绪。</string>
+    <string name="main_btn_open_accessibility">开启无障碍</string>
+</resources>

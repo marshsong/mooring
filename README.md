@@ -141,9 +141,10 @@ Both levels are data-driven from `detector_config.json`:
 
 | Symptom | Fix |
 |---|---|
-| Blocking stopped | Check the Accessibility toggle — vendors sometimes silently disable it; also check keep-alive settings |
-| WeChat update broke Channels detection | Upload a new `detector_config.json` from the console (Settings → Detector config); T1 quotas keep working meanwhile |
-| Console unreachable | Same Wi-Fi? Port 8765 open? Phone IP changed (DHCP) — rescan the QR |
+| Blocking stopped | Check the Accessibility toggle — vendors (Huawei especially) silently disable it after every app update; if the app still shows it off after re-enabling, toggle it off/on once to clear the "crashed service" flag |
+| WeChat Channels not detected / usage under-counts | WeChat does not expose its text tree to third-party accessibility (content scans come back empty), so detection relies on the window-class match when entering the page. Enter Channels once to lock it; detection persists while you stay inside. If WeChat updates change its classes, update the subscription from the console (Tabs → Subscriptions) — the engine itself never changes |
+| Console unreachable on LAN | Same Wi-Fi? Port 8765 open? Phone IP changed (DHCP) — rescan the QR. **If your PC runs a VPN, LAN HTTP is often blocked even when ping works**: quit the VPN, or use the USB fallback below |
+| Console unreachable while PC VPN is on | Keep USB plugged and run `adb forward tcp:8765 tcp:8765`, then open `http://127.0.0.1:8765` — traffic goes through the USB pipe and bypasses the VPN entirely. The phone's guide page shows this command too |
 
 ## Privacy
 

@@ -192,6 +192,12 @@ class MooringAccessibilityService : AccessibilityService() {
                     val root = rootInActiveWindow ?: return@runCatching
                     val texts = T2ContentScanner(root).collectTexts()
                     val feature = detector.matchByContent(pkg, texts)
+                    if (pkg == "com.tencent.mm") {
+                        Log.i(
+                            TAG,
+                            "T2_SCAN texts=${texts.size} first=${texts.take(5).joinToString("|") { it.take(12) }} matched=${feature != null}",
+                        )
+                    }
                     contentHandler.post { applyContentScanResult(pkg, feature) }
                 }
             }

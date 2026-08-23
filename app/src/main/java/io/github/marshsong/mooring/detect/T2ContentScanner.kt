@@ -35,7 +35,7 @@ class T2ContentScanner(private val root: AccessibilityNodeInfo) {
     }
 
     companion object {
-        const val MAX_DEPTH = 15
-        const val MAX_NODES = 500
+        const val MAX_DEPTH = 30
+        const val MAX_NODES = 3000
     }
 }

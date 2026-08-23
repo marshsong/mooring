@@ -14,6 +14,7 @@ import io.github.marshsong.mooring.block.BlockManager
 import io.github.marshsong.mooring.data.MooringDatabase
 import io.github.marshsong.mooring.data.MooringRepository
 import io.github.marshsong.mooring.data.RoomMooringRepository
+import io.github.marshsong.mooring.detect.T2ContentScanner
 import io.github.marshsong.mooring.detect.UsageTracker
 import io.github.marshsong.mooring.engine.DetectorConfig
 import io.github.marshsong.mooring.engine.ForegroundMatcher
@@ -27,6 +28,8 @@ import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
 import io.github.marshsong.mooring.engine.model.TargetKind
 import io.github.marshsong.mooring.engine.model.TargetSource
+import io.github.marshsong.mooring.engine.t2.T2Detector
+import io.github.marshsong.mooring.subscription.SubscriptionImporter
 import io.github.marshsong.mooring.ui.ReinActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,9 +52,12 @@ import java.time.format.DateTimeFormatter
 class MooringAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private val contentHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val tickRunnable: Runnable = Runnable { tick() }
     private val engine = RuleEngine()
+    private val detector = T2Detector()
+    private val pendingContentScans = HashSet<String>()
 
     private lateinit var repository: MooringRepository
     private lateinit var blockManager: BlockManager
@@ -80,37 +86,94 @@ class MooringAccessibilityService : AccessibilityService() {
         )
 
         scope.launch {
-            seedDevTargetsIfFirstRun()
+            bootstrapDevIfFirstRun()
             snapTargets = repository.allTargets()
             snapRules = repository.allRules()
+            reloadT2()
             usageCache = repository.usageMap(today).toMutableMap()
             repository.cleanupOldEvents(System.currentTimeMillis() - RETENTION_MS)
             logEvent(EventType.SERVICE_STATUS, null, null, "Moored")
             Log.i(
                 TAG,
                 "SERVICE_STATUS Moored configVersion=${config?.configVersion} " +
-                    "targets=${snapTargets.size} rules=${snapRules.size}",
+                    "targets=${snapTargets.size} rules=${snapRules.size} t2Features=${detector.featureCount}",
             )
         }
         handler.postDelayed(tickRunnable, TICK_INTERVAL_MS)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged(event)
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> onContentChanged(event)
+        }
+    }
+
+    private fun onWindowChanged(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString()
+        val className = event.className?.toString()
         val cfg = config ?: return
-        val matched = ForegroundMatcher.match(pkg, packageName, cfg, snapTargets)
-        val targetId = matched.firstOrNull()?.targetId
+        val targetId = resolveTargetId(pkg, className, cfg)
 
         currentForegroundTargetId = targetId
         blockManager.onForegroundChanged(targetId)
-        Log.i(TAG, "T1_FOREGROUND pkg=$pkg hit=${targetId ?: "none"}")
+        Log.i(TAG, "T1_FOREGROUND pkg=$pkg className=$className hit=${targetId ?: "none"}")
 
         // 先落盘上一个目标（若正在计时），再对新目标做进入评估
         tracker?.onForeground(targetId)
         if (targetId != null) {
-            evaluateBlock(matched.first())
+            snapTargets.firstOrNull { it.targetId == targetId }?.let { evaluateBlock(it) }
         }
+
+        // 包有已启用订阅但一级未命中：调度二级内容扫描（兜底内嵌入口）
+        if (pkg != null && detector.hasActiveFeatures(pkg) && targetId == null) {
+            scheduleContentScan(pkg)
+        }
+    }
+
+    private fun onContentChanged(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString()
+        if (pkg != null && detector.hasActiveFeatures(pkg)) {
+            scheduleContentScan(pkg)
+        }
+    }
+
+    /** 解析当前前台目标：T2 功能优先（更具体），否则 T1 APP。 */
+    private fun resolveTargetId(pkg: String?, className: String?, cfg: DetectorConfig): String? {
+        if (pkg == null) return null
+        if (detector.hasActiveFeatures(pkg)) {
+            detector.matchByClassName(pkg, className)?.let { feature ->
+                val targetId = detector.targetIdOf(pkg, feature)
+                if (snapTargets.any { it.targetId == targetId && it.enabled }) return targetId
+            }
+        }
+        return ForegroundMatcher.match(pkg, packageName, cfg, snapTargets).firstOrNull()?.targetId
+    }
+
+    /** 二级内容扫描（按检测配置去抖，每包同时仅一个挂起任务）。 */
+    private fun scheduleContentScan(pkg: String) {
+        if (!pendingContentScans.add(pkg)) return
+        val debounce = config?.detectionDebounceMs ?: 300L
+        contentHandler.postDelayed({
+            pendingContentScans.remove(pkg)
+            runContentScan(pkg)
+        }, debounce)
+    }
+
+    private fun runContentScan(pkg: String) {
+        val root = rootInActiveWindow ?: return
+        val texts = T2ContentScanner(root).collectTexts()
+        val feature = detector.matchByContent(pkg, texts) ?: return
+        val targetId = detector.targetIdOf(pkg, feature)
+        val target = snapTargets.firstOrNull { it.targetId == targetId && it.enabled } ?: return
+
+        if (currentForegroundTargetId != targetId) {
+            currentForegroundTargetId = targetId
+            blockManager.onForegroundChanged(targetId)
+            tracker?.onForeground(targetId)
+        }
+        Log.i(TAG, "T2_DETECTED target=$targetId level=CONTENT")
+        evaluateBlock(target)
     }
 
     override fun onInterrupt() {
@@ -120,6 +183,7 @@ class MooringAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         tracker?.flush()
         handler.removeCallbacksAndMessages(null)
+        contentHandler.removeCallbacksAndMessages(null)
         scope.cancel()
         super.onDestroy()
     }
@@ -211,9 +275,14 @@ class MooringAccessibilityService : AccessibilityService() {
         packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
     }.getOrNull()
 
-    /** 首次运行把开发期种子写入数据库（后续以库内配置为准）。 */
-    private suspend fun seedDevTargetsIfFirstRun() {
+    /** 首次运行把开发期种子（T1 + Mock 订阅）写入数据库；后续以库内配置为准。 */
+    private suspend fun bootstrapDevIfFirstRun() {
         if (repository.allTargets().isNotEmpty()) return
+        seedDevTargets()
+        bootstrapMockSubscription()
+    }
+
+    private suspend fun seedDevTargets() {
         val seed = loadDevSeed() ?: return
         val now = System.currentTimeMillis()
 
@@ -278,6 +347,45 @@ class MooringAccessibilityService : AccessibilityService() {
         Log.i(TAG, "DEV_SEED applied targets=${targets.size} groups=${groups.size} rules=${rules.size}")
     }
 
+    /** 首次运行导入仓库内置 Mock 订阅，并给非 alwaysBlock 功能加 0 分钟配额（进入即拦，M2 演示）。 */
+    private suspend fun bootstrapMockSubscription() {
+        val text = try {
+            assets.open(MOCK_SUB_ASSET).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            Log.w(TAG, "mock subscription asset missing")
+            return
+        }
+        val parsed = try {
+            SubscriptionImporter(repository).import(text)
+        } catch (e: Exception) {
+            Log.w(TAG, "mock subscription import failed: ${e.message}")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val demoRules = parsed.apps.flatMap { app ->
+            app.features.filter { !it.alwaysBlock }.map { feature ->
+                val targetId = TargetId.func(app.packageName, feature.featureId)
+                Rule(
+                    id = "mock-quota0-$targetId",
+                    targetId = targetId,
+                    type = RuleType.DAILY_QUOTA,
+                    quotaMinutes = 0,
+                    enabled = true,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            }
+        }
+        if (demoRules.isNotEmpty()) repository.upsertRules(demoRules)
+        Log.i(TAG, "MOCK_SUB imported features=${parsed.featureCount}")
+    }
+
+    /** 从启用的订阅重建 T2 索引（订阅导入/热更新后调用）。 */
+    private suspend fun reloadT2() {
+        detector.load(repository.enabledSubscriptions())
+        Log.i(TAG, "T2_LOAD features=${detector.featureCount} packages=${detector.packages().size}")
+    }
+
     private fun loadDevSeed(): DevSeed? {
         val jsonText = try {
             assets.open(DEV_SEED_ASSET).bufferedReader().use { it.readText() }
@@ -320,6 +428,7 @@ class MooringAccessibilityService : AccessibilityService() {
         private const val TAG = "Mooring"
         private const val CONFIG_ASSET = "detector_config.json"
         private const val DEV_SEED_ASSET = "dev_enabled_targets.json"
+        private const val MOCK_SUB_ASSET = "mock_subscription.json"
         private const val TICK_INTERVAL_MS = 10_000L
         private const val RETENTION_MS = 90L * 24 * 60 * 60 * 1000
         private val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")

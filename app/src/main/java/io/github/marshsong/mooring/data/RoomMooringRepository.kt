@@ -6,12 +6,29 @@ package io.github.marshsong.mooring.data
 import androidx.room.withTransaction
 import io.github.marshsong.mooring.engine.model.EventLog
 import io.github.marshsong.mooring.engine.model.Rule
+import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
 import io.github.marshsong.mooring.engine.model.UsageDaily
 
 /** Room 实现的仓库。 */
 class RoomMooringRepository(private val db: MooringDatabase) : MooringRepository {
+
+    override suspend fun upsertTargets(targets: List<Target>) {
+        if (targets.isNotEmpty()) db.targetDao().upsertAll(targets)
+    }
+
+    override suspend fun upsertRules(rules: List<Rule>) {
+        if (rules.isNotEmpty()) db.ruleDao().upsertAll(rules)
+    }
+
+    override suspend fun subscriptions(): List<Subscription> = db.subscriptionDao().getAll()
+
+    override suspend fun enabledSubscriptions(): List<Subscription> = db.subscriptionDao().getEnabled()
+
+    override suspend fun upsertSubscription(subscription: Subscription) {
+        db.subscriptionDao().upsert(subscription)
+    }
 
     override suspend fun enabledTargets(): List<Target> = db.targetDao().getEnabled()
 

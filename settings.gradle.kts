@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "mooring"
 include(":app")
+include(":mockapp")

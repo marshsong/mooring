@@ -1,0 +1,31 @@
+{
+  "subscriptionVersion": 1,
+  "name": "Mock Super App Feed Blocker",
+  "apps": [
+    {
+      "package": "com.example.mocksuperapp",
+      "features": [
+        {
+          "featureId": "MOCK_FEED",
+          "label": "Mock Feed",
+          "alwaysBlock": false,
+          "activityPatterns": ["com\\.example\\.mocksuperapp\\.feed\\..*"],
+          "contentRules": {
+            "titleKeywords": ["MOCKFEED"],
+            "tabKeywords": ["FOR YOU", "FOLLOWING"],
+            "requiredTabs": 1
+          }
+        },
+        {
+          "featureId": "MOCK_LIVE",
+          "label": "Mock Live",
+          "alwaysBlock": true,
+          "activityPatterns": ["com\\.example\\.mocksuperapp\\.live\\..*"],
+          "contentRules": {
+            "extraKeywords": ["LIVE NOW"]
+          }
+        }
+      ]
+    }
+  ]
+}

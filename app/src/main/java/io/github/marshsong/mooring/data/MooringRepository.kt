@@ -5,6 +5,7 @@ package io.github.marshsong.mooring.data
 
 import io.github.marshsong.mooring.engine.model.EventLog
 import io.github.marshsong.mooring.engine.model.Rule
+import io.github.marshsong.mooring.engine.model.Subscription
 import io.github.marshsong.mooring.engine.model.Target
 import io.github.marshsong.mooring.engine.model.TargetGroup
 
@@ -21,6 +22,18 @@ interface MooringRepository {
 
     /** 全量替换配置（启用目标、组、规则），用于种子初始化与控制台同步。 */
     suspend fun replaceConfig(targets: List<Target>, groups: List<TargetGroup>, rules: List<Rule>)
+
+    /** 追加/覆盖目标（订阅导入等增量场景，不清空既有配置）。 */
+    suspend fun upsertTargets(targets: List<Target>)
+
+    /** 追加/覆盖规则（订阅导入等增量场景）。 */
+    suspend fun upsertRules(rules: List<Rule>)
+
+    suspend fun subscriptions(): List<Subscription>
+
+    suspend fun enabledSubscriptions(): List<Subscription>
+
+    suspend fun upsertSubscription(subscription: Subscription)
 
     suspend fun usedSeconds(targetId: String, dateStr: String): Long
 

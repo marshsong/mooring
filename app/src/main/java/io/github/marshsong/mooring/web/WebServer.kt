@@ -311,7 +311,7 @@ class WebServer(
         }
         if (newRules.isNotEmpty()) repository.upsertRules(newRules)
         onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("targetId" to targetId, "enabled" to true)))
+        respondOk(buildJsonObject { put("targetId", targetId); put("enabled", true) })
     }
 
     private suspend fun ApplicationCall.handleDisableTarget() {
@@ -420,7 +420,7 @@ class WebServer(
             repository.deleteRule(r.id)
         }
         onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("id" to id, "deleted" to true)))
+        respondOk(buildJsonObject { put("id", id); put("deleted", true) })
     }
 
     private suspend fun ApplicationCall.handleCreateRule() {
@@ -473,7 +473,7 @@ class WebServer(
         val id = parameters["id"] ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
         repository.deleteRule(id)
         onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("id" to id, "deleted" to true)))
+        respondOk(buildJsonObject { put("id", id); put("deleted", true) })
     }
 
     private suspend fun ApplicationCall.handleImportSubscription() {
@@ -487,9 +487,11 @@ class WebServer(
         }
         onConfigChanged()
         respondOk(
-            apiJson.encodeToJsonElement(
-                mapOf("name" to parsed.name, "features" to parsed.featureCount, "version" to parsed.subscriptionVersion)
-            )
+            buildJsonObject {
+                put("name", parsed.name)
+                put("features", parsed.featureCount)
+                put("version", parsed.subscriptionVersion)
+            }
         )
     }
 
@@ -502,7 +504,7 @@ class WebServer(
             ?: return respondFail(HttpStatusCode.BadRequest, "BAD_REQUEST")
         repository.upsertSubscription(existing.copy(enabled = req.enabled, updatedAt = System.currentTimeMillis()))
         onConfigChanged()
-        respondOk(apiJson.encodeToJsonElement(mapOf("id" to id, "enabled" to req.enabled)))
+        respondOk(buildJsonObject { put("id", id); put("enabled", req.enabled) })
     }
 
     private suspend fun ApplicationCall.handleUsage() {
@@ -588,9 +590,11 @@ class WebServer(
         val minutes = req?.minutes ?: settings.focusDefaultMinutes
         focusManager.start(minutes)
         respondOk(
-            apiJson.encodeToJsonElement(
-                mapOf("active" to true, "minutes" to minutes, "remainingSeconds" to focusManager.remainingSeconds())
-            )
+            buildJsonObject {
+                put("active", true)
+                put("minutes", minutes)
+                put("remainingSeconds", focusManager.remainingSeconds())
+            }
         )
     }
 

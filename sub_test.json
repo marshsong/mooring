@@ -1,0 +1,25 @@
+{
+  "subscriptionVersion": 1,
+  "name": "WeChat Channels",
+  "apps": [
+    {
+      "package": "com.tencent.mm",
+      "features": [
+        {
+          "featureId": "WECHAT_CHANNELS",
+          "label": "视频号",
+          "alwaysBlock": false,
+          "activityPatterns": [
+            "com\\.tencent\\.mm\\.plugin\\.finder\\..*"
+          ],
+          "contentRules": {
+            "titleKeywords": ["视频号"],
+            "tabKeywords": ["推荐", "关注", "朋友"],
+            "requiredTabs": 1,
+            "extraKeywords": ["直播中"]
+          }
+        }
+      ]
+    }
+  ]
+}

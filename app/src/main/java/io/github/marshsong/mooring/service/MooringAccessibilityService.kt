@@ -69,6 +69,8 @@ class MooringAccessibilityService : AccessibilityService() {
     private var usageCache: MutableMap<String, Long> = mutableMapOf()
     private var bonusCache: MutableMap<String, Long> = mutableMapOf()
     private var currentForegroundTargetId: String? = null
+    private var currentPackage: String? = null
+    private var lastWindowClassName: String? = null
     private var tracker: UsageTracker? = null
     private var today: String = LocalDate.now().format(ISO_DATE)
 
@@ -123,21 +125,44 @@ class MooringAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString()
         val className = event.className?.toString()
         val cfg = config ?: return
-        val targetId = resolveTargetId(pkg, className, cfg)
+        if (pkg == null) return
 
+        lastWindowClassName = className
+        val leftApp = pkg != currentPackage
+        currentPackage = pkg
+
+        // 一级：窗口类名匹配 T2 功能（最高优先级）
+        val t2Id = resolveT2TargetId(pkg, className)
+        if (t2Id != null) {
+            setCurrentTarget(t2Id)
+        } else if (leftApp || !detector.hasActiveFeatures(pkg)) {
+            // 换了应用，或无订阅：直接解析 T1（或清空）
+            val t1Id = ForegroundMatcher.match(pkg, packageName, cfg, snapTargets).firstOrNull()?.targetId
+            setCurrentTarget(t1Id)
+        }
+        // 同包内一级未命中：保留当前目标，交给内容扫描精化（避免微信切窗漏记）
+        if (detector.hasActiveFeatures(pkg)) {
+            scheduleContentScan(pkg)
+        }
+        Log.i(TAG, "T1_FOREGROUND pkg=$pkg className=$className hit=${currentForegroundTargetId ?: "none"}")
+    }
+
+    private fun resolveT2TargetId(pkg: String, className: String?): String? {
+        if (!detector.hasActiveFeatures(pkg)) return null
+        return detector.matchByClassName(pkg, className)?.let { feature ->
+            val targetId = detector.targetIdOf(pkg, feature)
+            if (snapTargets.any { it.targetId == targetId && it.enabled }) targetId else null
+        }
+    }
+
+    /** 统一设置当前目标：更新状态、通知拦截器、切换计时器起点。 */
+    private fun setCurrentTarget(targetId: String?) {
+        if (currentForegroundTargetId == targetId) return
         currentForegroundTargetId = targetId
         blockManager.onForegroundChanged(targetId)
-        Log.i(TAG, "T1_FOREGROUND pkg=$pkg className=$className hit=${targetId ?: "none"}")
-
-        // 先落盘上一个目标（若正在计时），再对新目标做进入评估
         tracker?.onForeground(targetId)
         if (targetId != null) {
             snapTargets.firstOrNull { it.targetId == targetId }?.let { evaluateBlock(it) }
-        }
-
-        // 包有已启用订阅但一级未命中：调度二级内容扫描（兜底内嵌入口）
-        if (pkg != null && detector.hasActiveFeatures(pkg) && targetId == null) {
-            scheduleContentScan(pkg)
         }
     }
 
@@ -146,18 +171,6 @@ class MooringAccessibilityService : AccessibilityService() {
         if (pkg != null && detector.hasActiveFeatures(pkg)) {
             scheduleContentScan(pkg)
         }
-    }
-
-    /** 解析当前前台目标：T2 功能优先（更具体），否则 T1 APP。 */
-    private fun resolveTargetId(pkg: String?, className: String?, cfg: DetectorConfig): String? {
-        if (pkg == null) return null
-        if (detector.hasActiveFeatures(pkg)) {
-            detector.matchByClassName(pkg, className)?.let { feature ->
-                val targetId = detector.targetIdOf(pkg, feature)
-                if (snapTargets.any { it.targetId == targetId && it.enabled }) return targetId
-            }
-        }
-        return ForegroundMatcher.match(pkg, packageName, cfg, snapTargets).firstOrNull()?.targetId
     }
 
     /** 二级内容扫描（按检测配置去抖，每包同时仅一个挂起任务）。 */
@@ -173,17 +186,24 @@ class MooringAccessibilityService : AccessibilityService() {
     private fun runContentScan(pkg: String) {
         val root = rootInActiveWindow ?: return
         val texts = T2ContentScanner(root).collectTexts()
-        val feature = detector.matchByContent(pkg, texts) ?: return
-        val targetId = detector.targetIdOf(pkg, feature)
-        val target = snapTargets.firstOrNull { it.targetId == targetId && it.enabled } ?: return
-
-        if (currentForegroundTargetId != targetId) {
-            currentForegroundTargetId = targetId
-            blockManager.onForegroundChanged(targetId)
-            tracker?.onForeground(targetId)
+        val feature = detector.matchByContent(pkg, texts)
+        if (feature != null) {
+            val targetId = detector.targetIdOf(pkg, feature)
+            val target = snapTargets.firstOrNull { it.targetId == targetId && it.enabled } ?: return
+            setCurrentTarget(targetId)
+            Log.i(TAG, "T2_DETECTED target=$targetId level=CONTENT")
+            evaluateBlock(target)
+        } else {
+            // 内容未命中：仅当当前窗口类名也不是该包的任何功能（如已切到聊天）时才清除。
+            // 在功能页内滚动时类名仍命中 finder，即使内容抓不全也不丢计时。
+            val cur = currentForegroundTargetId
+            if (cur != null && cur.startsWith("FUNC:") && TargetId.parsePackage(cur) == pkg) {
+                val stillOnFeature = resolveT2TargetId(pkg, lastWindowClassName) != null
+                if (!stillOnFeature) {
+                    setCurrentTarget(null)
+                }
+            }
         }
-        Log.i(TAG, "T2_DETECTED target=$targetId level=CONTENT")
-        evaluateBlock(target)
     }
 
     override fun onInterrupt() {

@@ -20,7 +20,7 @@ jobs:
             MATCHES=$(grep -rn -F -- "$p" app/src/ 2>/dev/null)
             if [ -n "$MATCHES" ]; then
               HITS="$HITS
-$MATCHES"
+              $MATCHES"
             fi
           done
           if [ -n "$HITS" ]; then

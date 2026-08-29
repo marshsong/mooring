@@ -299,18 +299,23 @@ class MooringAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 粘性锁周期检查：FUNC 目标长时间无正向信号且当前窗口类名已不在功能页时清除。
-     * 在功能页内滚动时 lastWindowClassName 保持功能类名，锁持续，计时连续。
+     * 粘性锁周期检查：FUNC 目标长时间无正向信号时清除。
+     * 窗口类仍为功能类（滚动中信号间歇）时给长宽限桥接，避免欠计；
+     * 一旦确认已切到非功能类窗口（如从视频号回到聊天），短宽限后即清，避免虚计。
+     * 两种情况超时都强制清除，防止屏幕熄灭/无窗口事件时锁残留、计时无限虚增。
      */
     private fun checkStickyStale() {
         val cur = currentForegroundTargetId ?: return
         if (!cur.startsWith("FUNC:")) return
-        if (System.currentTimeMillis() - lastPositiveSignalAt <= STICKY_GRACE_MS) return
         val pkg = TargetId.parsePackage(cur) ?: return
+        val idleMs = System.currentTimeMillis() - lastPositiveSignalAt
         val stillOnFeature = resolveT2TargetId(pkg, lastWindowClassName) != null
-        if (!stillOnFeature) {
-            setCurrentTarget(null)
+        if (stillOnFeature) {
+            if (idleMs <= STICKY_GRACE_MS) return
+        } else {
+            if (idleMs <= LEFT_GRACE_MS) return
         }
+        setCurrentTarget(null)
     }
 
     private fun logEvent(type: EventType, targetId: String?, ruleId: String?, detail: String?) {
@@ -569,6 +574,7 @@ class MooringAccessibilityService : AccessibilityService() {
         private const val TICK_INTERVAL_MS = 10_000L
         private const val RETENTION_MS = 90L * 24 * 60 * 60 * 1000
         private const val STICKY_GRACE_MS = 120_000L
+        private const val LEFT_GRACE_MS = 30_000L
         private const val ACTIVE_WINDOW_MS = 30_000L
         private val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 

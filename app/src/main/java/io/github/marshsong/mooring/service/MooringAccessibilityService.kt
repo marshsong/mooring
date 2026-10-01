@@ -190,12 +190,13 @@ class MooringAccessibilityService : AccessibilityService() {
             contentScanExecutor.execute {
                 runCatching {
                     val root = rootInActiveWindow ?: return@runCatching
-                    val texts = T2ContentScanner(root).collectTexts()
-                    val feature = detector.matchByContent(pkg, texts)
+                    val snapshot = T2ContentScanner(root).scan()
+                    val feature = detector.matchByContent(pkg, snapshot.texts, snapshot.viewClasses)
                     if (detector.hasActiveFeatures(pkg)) {
                         Log.i(
                             TAG,
-                            "T2_SCAN texts=${texts.size} first=${texts.take(5).joinToString("|") { it.take(12) }} matched=${feature != null}",
+                            "T2_SCAN texts=${snapshot.texts.size} classes=${snapshot.viewClasses.size} " +
+                                "first=${snapshot.texts.take(5).joinToString("|") { it.take(12) }} matched=${feature != null}",
                         )
                     }
                     contentHandler.post { applyContentScanResult(pkg, feature) }

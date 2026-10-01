@@ -61,6 +61,7 @@ object SubscriptionParser {
                             tabKeywords = cr.tabKeywords,
                             requiredTabs = cr.requiredTabs,
                             extraKeywords = cr.extraKeywords,
+                            viewClassKeywords = cr.viewClassKeywords,
                         )
                     },
                 )
@@ -102,6 +103,7 @@ object SubscriptionParser {
             @SerialName("tabKeywords") val tabKeywords: List<String> = emptyList(),
             @SerialName("requiredTabs") val requiredTabs: Int = 1,
             @SerialName("extraKeywords") val extraKeywords: List<String> = emptyList(),
+            @SerialName("viewClassKeywords") val viewClassKeywords: List<String> = emptyList(),
         )
     }
 }

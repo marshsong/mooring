@@ -54,6 +54,20 @@ class SubscriptionParserTest {
         assertEquals(1, feed.contentRules!!.requiredTabs)
     }
 
+    @Test
+    fun `parses view class keywords`() {
+        val parsed = SubscriptionParser.parse(
+            """{"apps":[{"package":"com.example.a","features":[{"featureId":"F1","contentRules":{"viewClassKeywords":["VideoSeekBar"]}}]}]}"""
+        )
+        assertEquals(listOf("VideoSeekBar"), parsed.apps[0].features[0].contentRules!!.viewClassKeywords)
+    }
+
+    @Test
+    fun `view class keywords default to empty`() {
+        val parsed = SubscriptionParser.parse(valid)
+        assertTrue(parsed.apps[0].features[0].contentRules!!.viewClassKeywords.isEmpty())
+    }
+
     @Test(expected = SubscriptionValidationException::class)
     fun `rejects invalid json`() {
         SubscriptionParser.parse("{ not json")

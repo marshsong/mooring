@@ -38,6 +38,12 @@ class T2DetectorTest {
                   "alwaysBlock": true,
                   "activityPatterns": ["com\\.example\\.mocksuperapp\\.live\\..*"],
                   "contentRules": { "extraKeywords": ["LIVE NOW"] }
+                },
+                {
+                  "featureId": "MOCK_VIDEO",
+                  "label": "Mock Video",
+                  "alwaysBlock": false,
+                  "contentRules": { "viewClassKeywords": ["VideoSeekBar"] }
                 }
               ]
             }
@@ -116,6 +122,29 @@ class T2DetectorTest {
     fun `empty texts never match`() {
         val d = detector()
         assertNull(d.matchByContent("com.example.mocksuperapp", emptyList()))
+    }
+
+    @Test
+    fun `level two matches view class keyword`() {
+        val d = detector()
+        val feat = d.matchByContent(
+            "com.example.mocksuperapp",
+            emptyList(),
+            listOf("android.widget.FrameLayout", "com.example.video.seekbar.VideoSeekBar"),
+        )
+        assertEquals("MOCK_VIDEO", feat!!.featureId)
+    }
+
+    @Test
+    fun `level two misses when only unrelated classes`() {
+        val d = detector()
+        assertNull(
+            d.matchByContent(
+                "com.example.mocksuperapp",
+                listOf("unrelated caption"),
+                listOf("android.widget.FrameLayout", "android.widget.ImageView"),
+            )
+        )
     }
 
     @Test

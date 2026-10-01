@@ -86,7 +86,7 @@ PC 挂了 VPN(全隧道/TUN 模式,如 Clash TUN),手机无 VPN,两者在同一 
 
 ### 步骤
 1. 订阅解析与校验(JSON 可解析、包名合法、activityPatterns 可编译、至少一个 feature;任一失败整体拒绝,返回 SUBSCRIPTION_INVALID)。
-2. T2 检测:仅处理存在已启用 FUNC 订阅的包名;去抖 `detectionDebounceMs=300`;一级窗口类名正则(activityPatterns)优先;二级节点树内容规则(titleKeywords / tabKeywords / requiredTabs / extraKeywords),遍历深度 ≤15、节点数 ≤500,超限放弃;节点遍历不在主线程。
+2. T2 检测:仅处理存在已启用 FUNC 订阅的包名;去抖 `detectionDebounceMs=300`;一级窗口类名正则(activityPatterns)优先;二级节点树内容规则(viewClassKeywords / titleKeywords / tabKeywords / requiredTabs / extraKeywords),遍历深度 ≤15、节点数 ≤500,超限放弃;节点遍历不在主线程。
 3. 订阅导入热加载,无需重启服务。
 4. 仓库提供 Mock 示例订阅(com.example.mocksuperapp)与对应 Mock 测试应用(模拟 Feed/Live 页面),供自动化和演示。
 5. 自动化测试:进入 Mock Feed 600ms 内勒马页;Mock Live 永久禁用;控制台改订阅后热生效。

@@ -29,5 +29,7 @@ data class ParsedSubscription(
         val tabKeywords: List<String>,
         val requiredTabs: Int,
         val extraKeywords: List<String>,
+        /** 匹配节点类名（子串、忽略大小写），用于不暴露文本但控件类名固定的场景。 */
+        val viewClassKeywords: List<String> = emptyList(),
     )
 }

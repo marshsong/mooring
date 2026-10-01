@@ -13,7 +13,7 @@ import io.github.marshsong.mooring.engine.subscription.SubscriptionParser
  *
  * 两级判定，命中任一级即认为处于该功能页面：
  *  一级：窗口组件类名匹配 activityPatterns（优先）；
- *  二级：节点文本匹配 contentRules（标题关键词 / Tab 关键词 / 额外关键词）。
+ *  二级：节点文本与类名匹配 contentRules（类名关键词 / 标题关键词 / Tab 关键词 / 额外关键词）。
  */
 class T2Detector {
 
@@ -63,11 +63,15 @@ class T2Detector {
         }?.feature
     }
 
-    /** 二级：节点文本匹配 contentRules。 */
-    fun matchByContent(packageName: String, texts: List<String>): ParsedSubscription.ParsedFeature? {
-        if (texts.isEmpty()) return null
+    /** 二级：节点文本与类名匹配 contentRules。 */
+    fun matchByContent(
+        packageName: String,
+        texts: List<String>,
+        viewClasses: List<String> = emptyList(),
+    ): ParsedSubscription.ParsedFeature? {
+        if (texts.isEmpty() && viewClasses.isEmpty()) return null
         return byPackage[packageName]?.firstOrNull { entry ->
-            matchesContentRules(entry.feature.contentRules, texts)
+            matchesContentRules(entry.feature.contentRules, texts, viewClasses)
         }?.feature
     }
 
@@ -78,8 +82,14 @@ class T2Detector {
     private fun matchesContentRules(
         rules: ParsedSubscription.ContentRules?,
         texts: List<String>,
+        viewClasses: List<String>,
     ): Boolean {
         if (rules == null) return false
+        if (rules.viewClassKeywords.isNotEmpty() &&
+            rules.viewClassKeywords.any { kw -> viewClasses.any { it.contains(kw, ignoreCase = true) } }
+        ) {
+            return true
+        }
         if (rules.titleKeywords.isNotEmpty() && rules.titleKeywords.any { kw -> texts.any { it.contains(kw, ignoreCase = true) } }) {
             return true
         }

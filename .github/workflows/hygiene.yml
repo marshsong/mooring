@@ -39,6 +39,21 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # android-actions/setup-android@v3 runs `sdkmanager tools`, which now
+      # fails: the legacy `tools` package was dropped from the SDK repo.
+      # The runner image already ships cmdline-tools, so install only what
+      # AGP 8.7.3 needs (compileSdk 34).
+      - name: Prepare Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SDKMGR="$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -n 1)"
+          if [ -z "$SDKMGR" ]; then
+            echo "sdkmanager not found under $SDK" >&2
+            exit 1
+          fi
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       - name: Run JVM unit tests
         run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
